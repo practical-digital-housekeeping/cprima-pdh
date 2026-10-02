@@ -1,7 +1,7 @@
 # Practical Digital Housekeeping
 
 Keep your digital life in order, starting with your password database.
-**Keep it tidy. Keep it trustworthy.**
+**Keep it tidy. Keep it trustworthy.**  Website: https://pdh.cprima.net
 
 This monorepo holds the method and its companion tool `pdh`, published on PyPI as
 [`cprima-pdh`](packages/cprima-pdh/).

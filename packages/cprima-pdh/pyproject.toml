@@ -30,7 +30,8 @@ pdh = "cprima_pdh.cli:app"
 kdbx = "cprima_pdh.backends.kdbx:Backend"
 
 [project.urls]
-Homepage = "https://github.com/practical-digital-housekeeping/cprima-pdh/tree/main/packages/cprima-pdh"
+Homepage = "https://pdh.cprima.net"
+Source = "https://github.com/practical-digital-housekeeping/cprima-pdh/tree/main/packages/cprima-pdh"
 Repository = "https://github.com/practical-digital-housekeeping/cprima-pdh"
 Issues = "https://github.com/practical-digital-housekeeping/cprima-pdh/issues"
 
