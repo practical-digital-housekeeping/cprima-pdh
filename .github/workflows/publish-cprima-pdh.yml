@@ -1,0 +1,82 @@
+name: Publish cprima-pdh
+
+# Monorepo, one package per tag, PyPI trusted publishing (no tokens).
+# - Tag `cprima-pdh-vX.Y.Z` (must equal packages/cprima-pdh/pyproject.toml version) -> PyPI
+# - Manual run (Actions > Run workflow)                                           -> TestPyPI
+# Pending publishers on pypi.org and test.pypi.org: owner practical-digital-housekeeping, repo cprima-pdh,
+# workflow publish-cprima-pdh.yml, environments `pypi` and `testpypi`.
+
+on:
+  push:
+    tags:
+      - "cprima-pdh-v*"
+  workflow_dispatch: {}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/cprima-pdh
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Tag matches the package version
+        if: startsWith(github.ref, 'refs/tags/cprima-pdh-v')
+        run: |
+          want="${GITHUB_REF_NAME#cprima-pdh-v}"
+          have="$(grep -m1 '^version = ' pyproject.toml | cut -d'"' -f2)"
+          test "$want" = "$have" || { echo "tag $want != pyproject $have"; exit 1; }
+
+      - name: Run tests
+        run: uv run --extra kdbx --with pytest pytest -q
+
+      - name: Build sdist and wheel
+        # --out-dir: inside a workspace, `uv build` would write to the workspace root dist/
+        run: uv build --out-dir dist
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: packages/cprima-pdh/dist/
+
+  publish-testpypi:
+    needs: build
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/p/cprima-pdh
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/
+          repository-url: https://test.pypi.org/legacy/
+
+  publish:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/cprima-pdh-v')
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/cprima-pdh
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/

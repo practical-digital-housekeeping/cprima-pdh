@@ -1,0 +1,6 @@
+# Workspace root of the cprima-pdh monorepo (not published). The published package is packages/cprima-pdh.
+[tool.uv.workspace]
+members = ["packages/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["packages/cprima-pdh/tests"]

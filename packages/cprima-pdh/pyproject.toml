@@ -1,0 +1,42 @@
+[project]
+name = "cprima-pdh"
+version = "0.0.1"
+description = "Practical Digital Housekeeping: keep your digital life in order, starting with your password database."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
+authors = [{ name = "Christian Prior-Mamulyan" }]
+keywords = ["keepass", "kdbx", "password-manager", "digital-housekeeping", "pdh"]
+classifiers = [
+    "Development Status :: 1 - Planning",
+    "Environment :: Console",
+    "Intended Audience :: End Users/Desktop",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Topic :: Security",
+    "Topic :: Utilities",
+]
+dependencies = ["typer>=0.12"]
+
+[project.optional-dependencies]
+kdbx = ["pykeepass>=4.1"]
+all = ["cprima-pdh[kdbx]"]
+
+[project.scripts]
+pdh = "cprima_pdh.cli:app"
+
+[project.entry-points."pdh.backends"]
+kdbx = "cprima_pdh.backends.kdbx:Backend"
+
+[project.urls]
+Homepage = "https://github.com/practical-digital-housekeeping/cprima-pdh/tree/main/packages/cprima-pdh"
+Repository = "https://github.com/practical-digital-housekeeping/cprima-pdh"
+Issues = "https://github.com/practical-digital-housekeeping/cprima-pdh/issues"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/cprima_pdh"]
