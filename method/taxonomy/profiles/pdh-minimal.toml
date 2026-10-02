@@ -1,0 +1,148 @@
+# pdh-minimal: a tiny, complete profile of the pdh taxonomy.
+#
+# It exists to prove that nothing outside a profile file is tied to `pdh-default`: its own binding field, its own
+# areas, record types, vocabulary, levels and advice. Everything the engine needs is stated here; nothing is
+# inherited, nothing is merged. The file stays small on purpose; the names are test material, not a recommendation.
+
+[profile]
+taxonomy = "pdh"
+name = "minimal"
+version = "0.1"
+description = "A tiny complete profile: three areas, three record types, its own binding field. Proof that the profile drives everything."
+
+[binding]
+field = "_type"
+
+[level]
+default = "WARN"
+required = "ERROR"
+pattern = "INFO"
+"schema:unknown" = "ERROR"
+
+[standard.Title]
+kind = "text"
+description = "The entry's title."
+
+[standard.UserName]
+kind = "text"
+example = "user"
+description = "The user name of a login."
+
+[standard.Password]
+kind = "secret"
+example = "example-password"
+description = "The password of a login."
+
+[standard.URL]
+kind = "url"
+description = "The web address of a login."
+
+[standard.Notes]
+kind = "text"
+description = "Free-form notes."
+
+[standard.otp]
+kind = "otp"
+description = "The one-time-password secret of an entry."
+
+[advice.default]
+action = "review"
+
+[advice.required]
+action = "supply-value"
+command = "pdh edit set {entry} {term} <value> --apply"
+note = "ask the owner for the value; never invent one"
+
+[advice."schema:unknown"]
+action = "fix-schema"
+command = "pdh edit set {entry} {binding} <type> --overwrite --apply"
+note = "name a record type from `pdh method schemas`, or drop the field"
+
+[advice.pattern]
+action = "review-value"
+note = "format hint only"
+
+[taxonomy]
+title = "pdh-minimal"
+purpose = "The smallest complete profile: it shows what a profile has to state and that the engine reads nothing else."
+
+[area.Accounts]
+description = "Logins."
+
+[area.Money]
+description = "Accounts and cards."
+
+[area.Other]
+description = "Everything else."
+
+[kind.text]
+description = "Free text."
+example = "example"
+
+[kind.secret]
+description = "A secret."
+default_protected = true
+example = "example-secret"
+
+[kind.identifier]
+description = "A number or ID that is not secret."
+default_protected = false
+example = "ID-0001"
+
+[kind.url]
+description = "A web address."
+default_protected = false
+example = "https://example.org/"
+
+[kind.otp]
+description = "A one-time-password secret."
+default_protected = true
+example = "JBSWY3DPEHPK3PXP"
+
+[field.customer_id]
+kind = "identifier"
+description = "An identifier a provider gave you."
+
+[field.iban]
+kind = "identifier"
+description = "An international bank account number."
+example = "XX00 0000 0000 0000 00"
+
+[field.pin]
+kind = "secret"
+protected = true
+pattern = '[0-9]{4,8}'
+example = "0000"
+description = "A numeric PIN."
+
+[[match]]
+schema = "account"
+has = ["iban"]
+
+[facet.login]
+required = ["Title", "UserName", "Password", "URL"]
+https_only = true
+
+[schema.login]
+area = "Accounts"
+description = "A login at a website."
+facets = ["login"]
+
+[schema.account]
+area = "Money"
+description = "A bank account."
+required = ["Title", "iban"]
+recommended = ["customer_id"]
+
+[schema.card]
+area = "Money"
+description = "A payment card."
+required = ["Title", "pin"]
+closed = true
+expires = true
+
+[[decision]]
+date = "2026-10-03"
+status = "decided"
+by = "user"
+text = "A second, tiny profile exists to prove that nothing outside a profile file is tied to pdh-default."
