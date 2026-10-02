@@ -1,5 +1,8 @@
 set windows-shell := ["powershell.exe", "-NoLogo", "-Command"]
+set dotenv-load
 set quiet
+
+# The vault comes from KDBX_FILE (and KDBX_KEY) in the environment or a .env file; never committed.
 
 default:
     just --list
@@ -12,6 +15,38 @@ test:
 build:
     uv build --package cprima-pdh --out-dir packages/cprima-pdh/dist
 
-# run pdh from the workspace
+# refresh TAXONOMY.md and the packaged copy from method/taxonomy/schemas.toml
+taxonomy:
+    uv run --all-packages python -c "from pathlib import Path; import shutil; from cprima_pdh import schema, taxonomy; src = Path('method/taxonomy/schemas.toml'); Path('method/taxonomy/TAXONOMY.md').write_text(taxonomy.build(schema.load_schemas(src)).markdown, encoding='utf-8'); shutil.copyfile(src, 'packages/cprima-pdh/src/cprima_pdh/data/schemas.toml')"
+
+# run pdh from the workspace, e.g. `just pdh check conform -f json`
 pdh *args:
-    uv run --package cprima-pdh --extra kdbx pdh {{args}}
+    uv run --all-packages --all-extras pdh {{args}}
+
+# entries that do not conform (add --status all, -f json, ...)
+check *args:
+    uv run --all-packages --all-extras pdh check conform {{args}}
+
+# every finding with its level (--summary for counts)
+validate *args:
+    uv run --all-packages --all-extras pdh check validate {{args}}
+
+# group hierarchy with entry counts
+tree *args:
+    uv run --all-packages --all-extras pdh inspect tree {{args}}
+
+# all entries
+entries *args:
+    uv run --all-packages --all-extras pdh inspect entries {{args}}
+
+# cache the master password (default 30 min: --minutes N)
+unlock *args:
+    uv run --all-packages --all-extras pdh session unlock {{args}}
+
+# discard the cached session
+lock:
+    uv run --all-packages --all-extras pdh session lock
+
+# session state
+status:
+    uv run --all-packages --all-extras pdh session status

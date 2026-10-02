@@ -1,0 +1,810 @@
+# Practical Digital Housekeeping: schemas, field vocabulary and TAXONOMY (single source of truth).
+# Licensed under CC-BY-4.0. The taxonomy is dogma: field names outside the vocabulary are unsupported (WARN).
+#
+#   `pdh method show`      prints the taxonomy document generated from this file (`just taxonomy` refreshes TAXONOMY.md)
+#   `pdh method schemas`   prints the compiled rules and the vocabulary
+#   `pdh check validate`   reports violations (`--summary` for counts); `pdh check` lists conform / nonconform entries
+#
+# --- how entries are typed -------------------------------------------------------------------
+# An entry names its schemas in a custom field `_schema`, comma-separated, e.g.
+#     _schema = onlineshop, website
+# Every named schema applies (union). Unknown names are reported; no `_schema` = unclassified.
+# Folders play no role in typing. Set it with:  pdh edit set "group/path/title" _schema "website" --apply
+#
+# --- sections ---------------------------------------------------------------------------------
+# Rules (they validate entries):
+#   [field.NAME]   vocabulary term: a canonical field name, checked on EVERY entry
+#   [facet.NAME]   reusable bundle of field rules
+#   [schema.NAME]  a record type; mixes in facets with `facets = [...]`
+# Taxonomy (documentation, rendered by `pdh method show`):
+#   [taxonomy]     title, purpose, principles, naming_rules, binding_rules
+#   [[axis]] [area.NAME] [family.NAME] [kind.NAME] [[decision]] [[source]]
+#
+# `status = "proposed"` on a [field.*] or [schema.*] documents it in the taxonomy but it is
+# IGNORED by every check. Change it to "implemented" (the default) to activate it.
+#
+# field keys:   kind (see [kind.*]), family (list), status, description,
+#               aliases (engine feature; the public taxonomy defines none: non-canonical names are WARN),
+#               match (regex searched in the field NAME, for families like pins/tokens),
+#               protected (true = must be protected, false = must NOT be, unset = unchecked),
+#               pattern (regex the whole value must match; applies to NAME and aliases)
+# schema/facet keys:  family (schema only), status, description, facets,
+#               required (MUST: missing = ERROR), recommended (SHOULD: missing = WARN), optional (MAY),
+#               protected, https_only (WARN), expires (WARN), closed (WARN), aliases, types (field -> [field.*] type),
+#               links (link field -> the schemas its target may have; the field is a term of kind `link`)
+# Finding levels (log levels): ERROR = broken structure, WARN = hygiene, INFO = format hints (`pattern`).
+
+# =================================================================================================
+# TAXONOMY
+# =================================================================================================
+
+[taxonomy]
+title = "Taxonomy of schemas and fields"
+purpose = """
+KeePass entries are untyped bags of fields, and KeePassDX has no typed fields. Practical Digital
+Housekeeping emulates the typing that 1Password offers (field types and item categories) with explicit
+`_schema` fields and a controlled field vocabulary. This document describes that model. It is generated
+from `schemas.toml`, so it cannot contradict the rules that `pdh` applies.
+"""
+principles = [
+    "A record has exactly one owner (top-level group) and one area (sub-group), but one or more record types: `_schema` may name several schemas.",
+    "Multiple rules are the norm. A record type is composed from facets, an entry may carry several schemas, and the field vocabulary applies on top. Requirements are the union, so a rule is written once and never repeated.",
+    "Typing is explicit and lives on the entry (`_schema`), not in folder names or tags.",
+    "The taxonomy is dogma: one concept, one canonical term. A field name outside the vocabulary is unsupported and reported as a WARN.",
+    "Protection follows the kind of a field: secrets, keys and card numbers must be protected.",
+    "pdh reports findings and never blocks editing. KeePass stays the source of truth.",
+    "No secret value is ever printed by pdh.",
+    "Entries may relate to each other through a link field (a UUID). pdh checks that a link resolves and points at an allowed record type, never what it says.",
+    "pdh checks structure and hygiene: which fields exist, their names, their protection, whether an expiry date is set. It does not judge whether a value is correct (no checksums, no lookups); data quality is the owner's responsibility.",
+    "Folders are for browsing; day-to-day finding is done by search.",
+]
+naming_rules = [
+    "Field labels contain no spaces (decided).",
+    "Abbreviations are written in capitals (PIN, PUK, CVV, IBAN, BIC, ICCID, IMEI, MAC, SSID); snake_case is not applied mechanically (decided).",
+    "Other multi-word terms currently use `_` as separator (`customer_no`, `serial_number`); the style for ordinary words and for compounds that contain an abbreviation is still open.",
+    "Schema names are kebab-case, singular, named after the record type and never after a folder.",
+    "Only canonical terms are supported; other spellings (case, language, spacing) are renamed to the term. `mobile` and `phone` are two different terms.",
+    "A field name that is not in the vocabulary is unsupported (WARN): rename it to a term, or remove it.",
+    "Area names are Title Case, one to three words.",
+]
+binding_rules = [
+    "An entry names its schemas in the custom field `_schema`, comma-separated.",
+    "Every named schema applies; the requirements are the union.",
+    "`closed` is checked against the union of all applied schemas.",
+    "An unknown schema name is reported (`schema:unknown`); names are case-sensitive.",
+    "No `_schema` means unclassified: only the field vocabulary applies.",
+    "Facets are internal building blocks; `_schema` accepts schema names only.",
+]
+
+[[axis]]
+name = "Owner"
+meaning = "Whose record it is"
+where = "Top-level group, one per person, plus one for shared records"
+status = "decided"
+
+[[axis]]
+name = "Area"
+meaning = "Which part of life it belongs to"
+where = "Sub-group below the owner"
+status = "implemented"
+
+[[axis]]
+name = "Record type"
+meaning = "What kind(s) of record it is; one or more per entry"
+where = "`_schema` custom field with one or more schema names, emulating 1Password item categories"
+status = "implemented"
+
+[[axis]]
+name = "Sensitivity"
+meaning = "How bad a leak would be"
+where = "Tags (for example FinancialRisk, IdentityTheft, SecurityCritical, PrivacySensitive); never used for binding"
+status = "open"
+
+# --- areas (starter set: 10 life areas, one sub-group each below an owner) -----------------------
+
+[area."Work & Tech"]
+description = "Professional and technical accounts: development, cloud, SaaS, AI, RPA, device vendors."
+
+[area."Shopping"]
+description = "Shops, marketplaces and parcel services."
+
+[area."Leisure & Interests"]
+description = "Creative software and media, sport, forums, culture and hobbies."
+
+[area."Online & Communication"]
+description = "Social networks, e-mail, messaging, domains and hosting."
+
+[area."Home & Utilities"]
+description = "Telecom, energy, housing, home network and devices."
+
+[area."Money"]
+description = "Banks, brokers, insurance and payment accounts."
+
+[area."Learning"]
+description = "Courses, certifications and standards bodies."
+
+[area."Identity & Authorities"]
+description = "Public bodies, tax and identity documents."
+
+[area."Travel & Mobility"]
+description = "Travel, transport and vehicles."
+
+[area."Health"]
+description = "Health insurance, doctors and pharmacy."
+
+# --- families (groups of record types) ----------------------------------------------------------
+
+[family.access]
+description = "Accounts you log in to: websites, shops, e-mail, servers, APIs."
+
+[family.finance]
+description = "Money: payment cards, bank and broker accounts."
+
+[family.identity]
+description = "Who you are to others: ID documents, memberships, reward programmes."
+
+[family.telecom]
+description = "Mobile and fixed-line subscriptions and SIM cards."
+
+[family.contract]
+description = "Customer relationships with utilities and service providers."
+
+[family.device]
+description = "Hardware and its identifiers: routers, phones, HSMs, serial numbers."
+
+[family.keys]
+description = "Cryptographic keys, licenses and recovery material."
+
+# --- kinds (what a field is; modelled on 1Password field types) ---------------------------------
+
+[kind.text]
+description = "Free text."
+onepassword = "STRING"
+
+[kind.secret]
+description = "A secret the owner must not shoulder-surf: PIN, PUK, password, token, recovery code."
+onepassword = "CONCEALED"
+default_protected = true
+
+[kind.key]
+description = "Private key material (SSH, GPG, signing keys, seeds)."
+onepassword = "SSHKEY"
+default_protected = true
+
+[kind.identifier]
+description = "A number or ID that is not secret: customer number, serial number, ICCID, MAC."
+onepassword = "STRING"
+default_protected = false
+
+[kind.card]
+description = "A payment card number or security code."
+onepassword = "CREDIT_CARD_NUMBER"
+default_protected = true
+
+[kind.phone]
+description = "A phone number."
+onepassword = "PHONE"
+default_protected = false
+
+[kind.email]
+description = "An e-mail address."
+onepassword = "EMAIL"
+default_protected = false
+
+[kind.address]
+description = "A postal address."
+onepassword = "ADDRESS"
+default_protected = false
+
+[kind.url]
+description = "A web address."
+default_protected = false
+
+[kind.date]
+description = "A calendar date, such as a validity end."
+onepassword = "DATE"
+default_protected = false
+
+[kind.otp]
+description = "A one-time-password secret (TOTP/HOTP)."
+onepassword = "OTP"
+default_protected = true
+
+[kind.link]
+description = "A reference to another entry by UUID (a KeePass `{REF:T@I:...}` reference or the bare UUID). pdh checks that it resolves and that the target has an allowed schema; it never reads what is linked."
+default_protected = false
+
+# --- decision log -------------------------------------------------------------------------------
+
+[[decision]]
+date = "2026-10-02"
+status = "decided"
+by = "user"
+text = "The proposed generic schema `device` is renamed `hardware`, so that `device` only means the link field and the family; `wifi-access-point` and `openwrt-device` stay the implemented device schemas."
+
+[[decision]]
+date = "2026-10-01"
+status = "decided"
+by = "user"
+text = "`URL` is required for online shops and websites; entries without a URL are findings, not exceptions."
+
+[[decision]]
+date = "2026-10-01"
+status = "decided"
+by = "user"
+text = "Tags are not used to bind schemas to entries."
+
+[[decision]]
+date = "2026-10-01"
+status = "decided"
+by = "user"
+text = "Backups are the user's job. pdh never copies or backs up the database file, and writes are dry runs unless `--apply`."
+
+[[decision]]
+date = "2026-10-02"
+status = "decided"
+by = "user"
+text = "A website account is an entry that has a URL; the `website` schema is the base and `onlineshop` is a specialisation."
+
+[[decision]]
+date = "2026-10-02"
+status = "decided"
+by = "user"
+text = "`Password` stays required for `website`; entries without one are findings."
+
+[[decision]]
+date = "2026-10-02"
+status = "decided"
+by = "user"
+text = "Folders are irrelevant for usability (search is used); area sub-groups exist for browsing only."
+
+[[decision]]
+date = "2026-10-02"
+status = "decided"
+by = "user"
+text = "The taxonomy is dogma: one public taxonomy, no private overlays. Field names outside the vocabulary are unsupported and reported as WARN; the taxonomy defines no aliases."
+
+[[decision]]
+date = "2026-10-02"
+status = "decided"
+by = "user"
+text = "Typing is by an explicit `_schema` field, comma-separated, with several schemas allowed (union). Implicit matching rules and group globs were dropped."
+
+[[decision]]
+date = "2026-10-02"
+status = "decided"
+by = "user"
+text = "Reusable rule bundles are called 'facets' ('sub-schema' was rejected)."
+
+[[decision]]
+date = "2026-10-02"
+status = "decided"
+by = "user"
+text = "`phone` and `mobile` are separate vocabulary terms; 'landline' was rejected as a term."
+
+[[decision]]
+date = "2026-10-02"
+status = "decided"
+by = "user"
+text = "1Password is the model for field types and item categories. KeePassDX has no typed fields, so they are emulated with `_schema` files."
+
+[[decision]]
+date = "2026-10-02"
+status = "decided"
+by = "user"
+text = "No spaces in field labels."
+
+[[decision]]
+date = "2026-10-02"
+status = "decided"
+by = "user"
+text = "No batch write command (`set-many` was rejected); the scope is the tool itself, the `linkify()` / `tel:` idea was dropped."
+
+[[decision]]
+date = "2026-10-02"
+status = "decided"
+by = "user"
+text = "Abbreviations such as PIN are written in capitals; snake_case is not applied mechanically. The vocabulary terms `PIN`, `CVV` and `MAC` are written that way."
+
+[[decision]]
+date = "2026-10-02"
+status = "decided"
+by = "user"
+text = "pdh does not validate whether values are correct (no Luhn or IBAN checksums, no lookups): the user alone is responsible for data quality."
+
+[[decision]]
+date = "2026-10-02"
+status = "decided"
+by = "user"
+text = "One device, many users: the device is one entry; every additional user is its own entry with the standard login fields (KeePass clients give custom fields no autofill or auto-type), linked to the device by UUID, written as a KeePass reference. The device's main login stays in its own standard fields."
+
+[[decision]]
+date = "2026-10-02"
+status = "decided"
+by = "user"
+text = "`credit-card` (CVV allowed, not required) and `bank-card` (no CVV) replace `payment-card`; the shared part is the facet `card-core`; a card's validity is the entry's own expiry date."
+
+[[decision]]
+date = "2026-10-02"
+status = "decided"
+by = "user"
+text = "`http://` is a valid URI: pdh never treats it as an error; at most it is a WARN-level hint. Nothing may present it as a problem of its own invention."
+
+[[decision]]
+date = "2026-10-02"
+status = "open"
+by = "user"
+text = "Open question left from the log-level discussion: do the existing value-based checks (`pattern`) stay at all? They are INFO-level hints for now."
+
+[[decision]]
+date = "2026-10-02"
+status = "decided"
+by = "user"
+text = "Findings carry a level taken 1:1 from log levels: ERROR (broken structure, a `required` field missing, an unknown schema), WARN (hygiene such as `http://`, an unprotected secret, a missing `recommended` field or expiry date), INFO (format hints such as `pattern`). `validate --level` filters the display, `--fail-on` (default ERROR) decides the exit code. On the schema side the matching tiers are `required` (MUST), `recommended` (SHOULD) and `optional` (MAY)."
+
+[[decision]]
+date = "2026-10-02"
+status = "open"
+by = "user"
+text = "Label style for the rest: separator and case of ordinary multi-word terms (`customer_no` versus `CustomerNo`) and of compounds that contain an abbreviation (`SO_PIN`, `API_key`, `User_PIN`)."
+
+[[decision]]
+date = "2026-10-02"
+status = "open"
+by = "user"
+text = "Final list of kinds and families (the ones here are a first proposal)."
+
+[[source]]
+title = "1Password CLI: item field types"
+url = "https://www.1password.dev/cli/item-template-json/"
+
+[[source]]
+title = "1Password: item categories"
+url = "https://support.1password.com/item-categories/"
+
+[[source]]
+title = "Bitwarden: custom field types"
+url = "https://bitwarden.com/help/custom-fields/"
+
+[[source]]
+title = "Bitwarden: item types"
+url = "https://bitwarden.com/help/managing-items/"
+
+[[source]]
+title = "PARA method (Forte): areas of responsibility"
+url = "https://fortelabs.com/blog/para/"
+
+[[source]]
+title = "Johnny.Decimal: areas and categories"
+url = "https://johnnydecimal.com/10-19-concepts/11-core/11.01-the-system/"
+
+[[source]]
+title = "Getting Things Done: horizons of focus"
+url = "https://en.wikipedia.org/wiki/Getting_Things_Done"
+
+# =================================================================================================
+# FIELD VOCABULARY (checked on every entry)
+# =================================================================================================
+
+# Anything that looks like a secret by name must be protected: PINs, PUKs, tokens, API keys,
+# passwords, recovery/2FA material, Wi-Fi keys. The regex is a safety net for non-canonical
+# names until they are renamed to a term.
+[field.secret]
+description = "Secrets, recognised by name."
+kind = "secret"
+match = '(?i)pin|puk|token|secret|passw|kennwort|api[ _-]?key|recovery|2fa|wifi[ _-]?key|backupkey|keystore|reset code|unlock code'
+protected = true
+
+# Private key material by field name: `ssh_key`, `private_key`, `passphrase`, `armored`, `seed`,
+# `mnemonic`, ... Public keys (anything with `pub`/`public` in the name), fingerprints
+# and key check values are NOT matched: they are not secret.
+[field.key_material]
+description = "Private key material, recognised by name."
+kind = "key"
+family = ["keys"]
+match = '(?i)^(?!.*(?<![a-z])(pub(lic)?|fingerprint)(?![a-z])).*((?<![a-z])(ssh|rsa|ecdsa|ed25519|gpg|pgp|private|signing)(?![a-z]).*(?<![a-z])key(?![a-z])|(?<![a-z])privkey(?![a-z])|armou?red|(?<![a-z])seed(?![a-z])|mnemonic|passphrase|recovery phrase)'
+protected = true
+
+[field.PIN]
+description = "Numeric PIN or PUK."
+kind = "secret"
+family = ["telecom", "finance", "identity"]
+pattern = '[0-9]{4,8}'
+protected = true
+
+[field.CVV]
+description = "Card security code."
+kind = "card"
+family = ["finance"]
+pattern = '[0-9]{3,4}'
+protected = true
+
+[field.card_number]
+description = "Card number, digits with optional spaces."
+kind = "card"
+family = ["finance"]
+pattern = '[0-9 ]{13,23}'
+protected = true
+
+[field.license_key]
+description = "Software licence key."
+kind = "secret"
+family = ["keys"]
+protected = true
+
+[field.serial_number]
+description = "Manufacturer serial number of a device or product."
+kind = "identifier"
+family = ["device"]
+protected = false
+
+[field.customer_no]
+description = "Customer or account number at a company."
+kind = "identifier"
+family = ["access", "contract"]
+protected = false
+
+# Two distinct terms: `phone` is the ordinary (landline or general) number, `mobile` is a
+# mobile number.
+[field.phone]
+description = "Phone number (landline or general): digits with common separators or a tel: URI."
+kind = "phone"
+family = ["contract", "telecom"]
+pattern = '(tel:)?\+?[0-9 ()./-]{5,}'
+protected = false
+
+[field.mobile]
+description = "Mobile phone number."
+kind = "phone"
+family = ["contract", "telecom"]
+pattern = '(tel:)?\+?[0-9 ()./-]{5,}'
+protected = false
+
+[field.MAC]
+description = "Network hardware (MAC) address."
+kind = "identifier"
+family = ["device"]
+protected = false
+
+# One device, many users: the device is one entry; every additional user is its own entry with the standard
+# login fields (so autofill, auto-type and TOTP keep working) and this link to the device. Set it with
+# `pdh edit link "<account>" "<device>" --apply`.
+[field.device]
+description = "The device an account belongs to: a link to the device entry."
+kind = "link"
+family = ["device"]
+
+# --- proposed terms (documented only; ignored by every check until status = "implemented") -------
+
+[field.IBAN]
+status = "proposed"
+description = "International bank account number."
+kind = "identifier"
+family = ["finance"]
+protected = false
+
+[field.BIC]
+status = "proposed"
+description = "Bank identifier code (SWIFT)."
+kind = "identifier"
+family = ["finance"]
+protected = false
+
+[field.account_number]
+status = "proposed"
+description = "Account number at a bank or broker."
+kind = "identifier"
+family = ["finance"]
+protected = false
+
+[field.ICCID]
+status = "proposed"
+description = "SIM card serial number (ICCID)."
+kind = "identifier"
+family = ["telecom"]
+protected = false
+
+[field.PUK]
+status = "proposed"
+description = "SIM unlock code (PUK)."
+kind = "secret"
+family = ["telecom"]
+pattern = '[0-9]{8}'
+protected = true
+
+[field.IMEI]
+status = "proposed"
+description = "Phone hardware identifier (IMEI)."
+kind = "identifier"
+family = ["device"]
+protected = false
+
+[field.part_number]
+status = "proposed"
+description = "Manufacturer part number."
+kind = "identifier"
+family = ["device"]
+protected = false
+
+[field.SSID]
+description = "Wi-Fi network name."
+kind = "text"
+family = ["device"]
+
+[field.wifi_key]
+description = "Wi-Fi password."
+kind = "secret"
+family = ["device"]
+protected = true
+
+[field.contract_no]
+status = "proposed"
+description = "Contract or contract account number."
+kind = "identifier"
+family = ["contract"]
+protected = false
+
+[field.member_no]
+status = "proposed"
+description = "Membership number."
+kind = "identifier"
+family = ["identity"]
+protected = false
+
+[field.email]
+status = "proposed"
+description = "An e-mail address."
+kind = "email"
+family = ["access", "contract"]
+protected = false
+
+[field.address]
+status = "proposed"
+description = "A postal address, one line per line."
+kind = "address"
+family = ["contract", "identity"]
+protected = false
+
+[field.valid_until]
+status = "proposed"
+description = "End of validity (card expiry, certificate, contract)."
+kind = "date"
+protected = false
+
+[field.api_key]
+status = "proposed"
+description = "API key."
+kind = "secret"
+family = ["keys", "access"]
+protected = true
+
+[field.api_secret]
+status = "proposed"
+description = "API secret."
+kind = "secret"
+family = ["keys", "access"]
+protected = true
+
+[field.client_id]
+status = "proposed"
+description = "OAuth/API client identifier (not secret)."
+kind = "identifier"
+family = ["keys", "access"]
+protected = false
+
+[field.client_secret]
+status = "proposed"
+description = "OAuth/API client secret."
+kind = "secret"
+family = ["keys", "access"]
+protected = true
+
+[field.recovery_code]
+status = "proposed"
+description = "Account recovery or 2FA backup code."
+kind = "secret"
+family = ["keys"]
+protected = true
+
+[field.public_key]
+status = "proposed"
+description = "Public key; not secret."
+kind = "text"
+family = ["keys"]
+protected = false
+
+[field.fingerprint]
+status = "proposed"
+description = "Key fingerprint; not secret."
+kind = "identifier"
+family = ["keys"]
+protected = false
+
+# =================================================================================================
+# FACETS (reusable bundles)
+# =================================================================================================
+
+[facet.login]
+description = "Account at a website: needs a URL, https preferred"
+required = ["Title", "UserName", "Password", "URL"]
+https_only = true
+
+[facet.contact]
+description = "Postal and phone contact data"
+optional = ["address", "tel"]
+
+[facet.contact.types]
+tel = "phone"
+
+# The identifiers of a piece of hardware. Reused by every device-like record type.
+[facet.device-core]
+description = "A piece of hardware: its identifiers"
+optional = ["serial_number", "MAC"]
+
+# The admin interface of a device: where it is (URL, often a local http:// page, which is a valid URI) and the
+# account that opens it. Recommended, not required: a fresh device may have no password yet.
+[facet.admin-login]
+description = "Admin login of a device: the web interface and its account"
+recommended = ["URL", "UserName", "Password"]
+
+# SSH access to a device: the private key it accepts. A password login uses the standard Password field.
+# The key is protected by the vocabulary (`key_material`); a public key or fingerprint is not secret.
+[facet.ssh-access]
+description = "SSH access to a device: the private key"
+optional = ["ssh_key"]
+
+# A Wi-Fi network: its name is required, its key is recommended (a network can be open).
+[facet.wifi-network]
+description = "A Wi-Fi network: its name and key"
+required = ["SSID"]
+recommended = ["wifi_key"]
+
+# What every physical card has. A card also has a validity: the entry's own expiry date (a missing
+# one is reported at WARN level). `closed` makes a field that a card type does not allow visible:
+# a CVV on a bank card is such a mismatch.
+[facet.card-core]
+description = "Physical card: number, PIN, issuer, and a validity (the entry's expiry date)"
+required = ["Title"]
+optional = ["card_number", "PIN", "cardholder", "issuer", "issuer_phone"]
+expires = true
+closed = true
+
+# =================================================================================================
+# RECORD TYPES (schemas)
+# =================================================================================================
+
+# An account at a website: an entry with a URL.
+[schema.website]
+description = "Account at a website"
+family = "access"
+facets = ["login"]
+
+# An online shop is a website account with optional customer data: name both, `onlineshop, website`.
+[schema.onlineshop]
+description = "Online shop login"
+family = "access"
+facets = ["login", "contact"]
+optional = ["customer_no", "license_key"]
+
+# Two kinds of payment card; they differ in one field. A credit card may carry a CVV (allowed, not
+# required); a bank card (debit, Girocard) has none, so a CVV on it is reported as an unknown field.
+[schema.credit-card]
+description = "Credit card: a card core plus an optional CVV"
+family = "finance"
+facets = ["card-core"]
+optional = ["CVV"]
+
+[schema.bank-card]
+description = "Bank card (debit, Girocard): a card core, no CVV"
+family = "finance"
+facets = ["card-core"]
+
+# A key pair or key: SSH, GPG, signing keys. The private part is protected by the vocabulary
+# (`key_material`: any field named like `ssh_key`, `private_key`, `armored`); public
+# keys and fingerprints are deliberately not. Not closed: key entries vary a lot.
+[schema.keypair]
+description = "Public/private key (SSH, GPG, ...)"
+family = "keys"
+required = ["Title"]
+optional = ["fingerprint"]
+
+# A Wi-Fi access point, or a router with Wi-Fi: a device plus a Wi-Fi network. The admin login uses the
+# standard URL/UserName/Password fields; a local `http://` admin page is a valid URI and is not flagged
+# here. Not closed: devices carry all kinds of extra notes (port forwarding, firmware, ...).
+[schema.wifi-access-point]
+description = "Wi-Fi access point or router with Wi-Fi"
+family = "device"
+required = ["Title"]
+facets = ["device-core", "wifi-network", "admin-login"]
+
+# A device running OpenWrt, or a vendor fork of it (GL.iNet, RUTOS): the `root` account opens both the web
+# interface (LuCI) and SSH, by password (the standard fields) or by key. Name it together with the device
+# type: `_schema = wifi-access-point, openwrt-device`. pdh never checks that the user name is `root`.
+[schema.openwrt-device]
+description = "OpenWrt device: root login over the web interface and SSH"
+family = "device"
+required = ["Title"]
+facets = ["device-core", "admin-login", "ssh-access"]
+
+# An additional login on a device. The device entry keeps its main login in the standard fields; every other
+# user gets an entry of this type with the standard fields and a link to the device. The link must resolve and
+# must point at an entry that has one of the device schemas.
+[schema.device-account]
+description = "An additional login on a device, linked to the device entry"
+family = "access"
+required = ["Title", "UserName", "Password", "device"]
+optional = ["URL"]
+
+[schema.device-account.links]
+device = ["wifi-access-point", "openwrt-device"]
+
+[schema.sim-card]
+description = "SIM card"
+family = "telecom"
+required = ["Title", "phone_number", "PIN", "PUK"]
+optional = ["ICCID", "carrier", "contract_no"]
+closed = true
+
+[schema.sim-card.types]
+phone_number = "phone"
+PIN = "PIN"
+PUK = "PIN"
+
+# --- proposed record types (documented only; ignored by every check) -----------------------------
+
+[schema.bank-account]
+status = "proposed"
+description = "Bank or broker account"
+family = "finance"
+facets = ["login"]
+required = ["IBAN"]
+optional = ["BIC", "account_number"]
+
+[schema.utility-contract]
+status = "proposed"
+description = "Customer account with a utility or service provider"
+family = "contract"
+required = ["Title", "customer_no"]
+optional = ["contract_no", "phone", "email"]
+
+[schema.hardware]
+status = "proposed"
+description = "A piece of hardware with its identifiers"
+family = "device"
+required = ["Title"]
+optional = ["serial_number", "part_number", "MAC", "IMEI", "SSID", "wifi_key"]
+
+[schema.hsm]
+status = "proposed"
+description = "Hardware security module with its PINs"
+family = "device"
+required = ["Title"]
+optional = ["serial_number", "so_pin", "user_pin"]
+
+[schema.identity-document]
+status = "proposed"
+description = "ID card, passport, certificate and similar"
+family = "identity"
+required = ["Title"]
+optional = ["valid_until", "PIN"]
+
+[schema.membership]
+status = "proposed"
+description = "Membership or reward programme"
+family = "identity"
+required = ["Title", "member_no"]
+optional = ["valid_until"]
+
+[schema.software-license]
+status = "proposed"
+description = "Software licence"
+family = "keys"
+required = ["Title", "license_key"]
+optional = ["serial_number"]
+
+[schema.api-credential]
+status = "proposed"
+description = "API or OAuth credential"
+family = "keys"
+required = ["Title"]
+optional = ["api_key", "api_secret", "client_id", "client_secret"]

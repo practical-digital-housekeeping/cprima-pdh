@@ -17,7 +17,7 @@ classifiers = [
     "Topic :: Security",
     "Topic :: Utilities",
 ]
-dependencies = ["typer>=0.12"]
+dependencies = ["typer>=0.12", "pydantic>=2", "lxml"]
 
 [project.optional-dependencies]
 kdbx = ["pykeepass>=4.1"]
