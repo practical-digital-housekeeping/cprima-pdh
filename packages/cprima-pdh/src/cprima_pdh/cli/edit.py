@@ -88,17 +88,27 @@ def link(
 @app.command("rename-field")
 def rename_field(
     ctx: typer.Context,
-    path: EntryPath,
-    old: Annotated[str, typer.Argument(help="Current name of the custom field.")],
-    new: Annotated[str, typer.Argument(help="New name.")],
+    names: Annotated[list[str], typer.Argument(
+        help="PATH OLD NEW for one entry (`group/path/title`, as printed by check); with --all just OLD NEW.")],
     fmt: c.Fmt = Format.text,
     apply: c.Apply = False,
     username: Username = None,
+    all_entries: Annotated[bool, typer.Option("--all", help="Every live entry that has the field, not one entry.")] = False,
+    under: Annotated[Optional[str], typer.Option(
+        "--under", help="With --all: only entries below this group (e.g. one owner).")] = None,
 ) -> None:
-    """Rename one custom field on one entry, keeping value and protection."""
+    """Rename a custom field, keeping value and protection: on one entry, or with --all on every entry."""
+    wanted = 2 if all_entries else 3
+    if len(names) != wanted:
+        c.fail(f"expected {'OLD NEW' if all_entries else 'PATH OLD NEW'}, got {len(names)} argument(s)")
+    if (under is not None and not all_entries) or (username is not None and all_entries):
+        c.fail("--under belongs to --all; --username to a single entry")
     db, opener = _vault(ctx)
     try:
-        plan = fix_mod.rename_field(opener, db, path, old, new, apply, username)
+        if all_entries:
+            plan = fix_mod.rename_field_all(opener, db, names[0], names[1], apply, under)
+        else:
+            plan = fix_mod.rename_field(opener, db, names[0], names[1], names[2], apply, username)
     except write_mod.WriteError as exc:
         _refused(exc)
     c.emit(plan, fmt)

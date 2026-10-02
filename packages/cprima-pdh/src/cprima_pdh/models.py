@@ -35,7 +35,7 @@ class EntryRecord(Frozen):
     username: str
     url: str
     tags: list[str] = Field(default_factory=list)
-    totp_style: str | None = None  # "otp" | "TimeOtp" | "HmacOtp"
+    totp_style: str | None = None  # how its one-time password is stored: "otp" or an OTP plugin style (see the backend)
     custom_fields: list[str] = Field(default_factory=list)
     attachments: int = 0
     notes_length: int = 0
@@ -67,10 +67,22 @@ class TagCounts(Frozen):
     untagged_entries: int
 
 
+class TreeEntry(Frozen):
+    title: str
+    schemas: list[str] = Field(default_factory=list)  # the record types its `_schema` names
+    by_fields: list[str] = Field(default_factory=list)  # further types that follow from its fields (match rules)
+
+
 class GroupNode(Frozen):
+    """A group seen through the method: level (owner, area), totals, record types, and what looks out of place."""
     name: str
-    entry_count: int
-    entries: list[str] = Field(default_factory=list)  # titles, only with --entries
+    kind: Literal["root", "owner", "area", "group", "recycle-bin"] = "group"
+    total: int = 0  # every entry below this group (a recycle bin: what it holds, not part of any total)
+    typed: int = 0  # of those, entries with a valid `_schema`
+    entry_count: int = 0  # entries directly in this group
+    note: str = ""  # what the method would not expect here
+    collapsed: bool = False  # something below is not shown (--depth)
+    entries: list[TreeEntry] = Field(default_factory=list)  # only with --entries
     children: list[GroupNode] = Field(default_factory=list)
 
 
@@ -252,6 +264,62 @@ class ConformanceReport(Frozen):
     nonconform: int
     unclassified: int
     entries: list[EntryConformance]
+
+
+class BackendRow(Frozen):
+    name: str
+    ready: bool  # its dependencies are installed
+    detail: str
+
+
+class BackendList(Frozen):
+    backends: list[BackendRow]
+
+
+class SessionState(Frozen):
+    """The result of every `pdh session` command: what was done and where the session stands. Never a secret."""
+    action: Literal["unlocked", "locked", "no-session", "status"]
+    unlocked: bool
+    seconds_left: int = 0
+    minutes: int = 0  # the lifetime requested by `unlock`
+
+
+class ProfileInfo(Frozen):
+    name: str  # the full name, e.g. pdh-default
+    taxonomy: str
+    version: str
+    description: str = ""
+
+
+class ProfileList(Frozen):
+    profiles: list[ProfileInfo]
+
+
+CheckStatus = Literal["ok", "warn", "fail", "skip"]
+
+
+Section = Literal["setup", "file", "method"]
+
+
+class DoctorCheck(Frozen):
+    """One line of `pdh doctor`: what was looked at, how it stands, and what to do about it."""
+    section: Section
+    name: str
+    status: CheckStatus
+    detail: str
+    hint: str = ""
+
+    def __str__(self) -> str:
+        line = f"[{self.status:4}] {self.name:12} {self.detail}"
+        return line + (f"\n{'':20}-> {self.hint}" if self.hint else "")
+
+
+class DoctorReport(Frozen):
+    checks: list[DoctorCheck]
+
+    @property
+    def failed(self) -> bool:
+        return any(c.status == "fail" for c in self.checks)
 
 
 class SchemaView(Frozen):

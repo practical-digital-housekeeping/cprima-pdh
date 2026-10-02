@@ -11,14 +11,15 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Callable
 
 from .models import FixAction, FixPlan
-from .schema import NOT_CUSTOM_PREFIXES, SchemaSet, _bind, lookup_term, vocabulary_index
-from .source import pykeepass_open
+from .backends.kdbx import OTP_PREFIXES, STANDARD_ATTR
+from .schema import SchemaSet, _bind, lookup_term, vocabulary_index
+from .source import _gpath, _in_bin, pykeepass_open
 from .write import WriteError, _fingerprint, _lock_files, find_entry
 
 if TYPE_CHECKING:
     from pykeepass import PyKeePass
 
-_RESERVED = ("Title", "UserName", "Password", "URL", "Notes", "otp")
+_RESERVED = tuple(STANDARD_ATTR)  # the standard fields: not custom fields, so never renamed or treated as one
 
 
 @dataclass
@@ -40,7 +41,7 @@ def _plan(kp: PyKeePass, sset: SchemaSet, renames: bool, protection: bool) -> tu
     actions: list[FixAction] = []
     for e, path, _names, _unknown in _bind(kp, sset):
         ref = f"{path}/{e.title}"
-        keys = [k for k in (e.custom_properties or {}) if not k.startswith(NOT_CUSTOM_PREFIXES)]
+        keys = [k for k in (e.custom_properties or {}) if not k.startswith(OTP_PREFIXES)]
         existing = set(keys)
         for key in keys:
             found = lookup_term(key, exact, matchers)
@@ -161,6 +162,60 @@ def run_fix(
     return _commit(kp, db, before, ops, actions)
 
 
+def _check_names(old: str, new: str) -> None:
+    if not old or not new or old == new:
+        raise WriteError("old and new must be different, non-empty field names")
+    for name in (old, new):
+        if name in _RESERVED or name.startswith(OTP_PREFIXES):
+            raise WriteError(f"{name!r} is a standard or OTP field; only custom fields can be renamed")
+
+
+def _plan_rename_all(kp: PyKeePass, old: str, new: str, under: str | None) -> tuple[list[_Op], list[FixAction]]:
+    _check_names(old, new)
+    prefix = (under or "").strip("/")
+    rb = kp.recyclebin_group
+    bin_uuid = rb.uuid if rb is not None else None
+    ops: list[_Op] = []
+    actions: list[FixAction] = []
+    for e in kp.entries:
+        props = e.custom_properties or {}
+        path = _gpath(e.group)
+        if old not in props or _in_bin(e.group, bin_uuid):
+            continue
+        if prefix and path != prefix and not path.startswith(prefix + "/"):
+            continue
+        ref = f"{path}/{e.title}"
+        if new in props:
+            actions.append(FixAction(entry=ref, key=old, action=f"skipped: {new} already exists", new_key=new))
+            continue
+        ops.append(_Op(entry=e, ref=ref, key=old, target=new, protect=_protected(e, old)))
+        actions.append(FixAction(entry=ref, key=old, action="rename", new_key=new))
+    return ops, actions
+
+
+def plan_rename_all(kp: PyKeePass, old: str, new: str, under: str | None = None) -> FixPlan:
+    """What `rename_field_all` would do, without writing: every live entry that has `old` (below `under`, if given)."""
+    ops, actions = _plan_rename_all(kp, old, new, under)
+    return _plan_result(actions, len(ops), False)
+
+
+def rename_field_all(
+    open_db: Callable[[], PyKeePass],
+    db: Path,
+    old: str,
+    new: str,
+    apply: bool,
+    under: str | None = None,
+) -> FixPlan:
+    """Rename one custom field on every live entry that has it, keeping value and protection. One save, verified."""
+    before = _fingerprint(db)
+    kp = open_db()
+    ops, actions = _plan_rename_all(kp, old, new, under)
+    if not apply or not ops:
+        return _plan_result(actions, len(ops), False)
+    return _commit(kp, db, before, ops, actions)
+
+
 def rename_field(
     open_db: Callable[[], PyKeePass],
     db: Path,
@@ -175,12 +230,11 @@ def rename_field(
     kp = open_db()
     e = find_entry(kp, path, username)
     props = e.custom_properties or {}
-    if old in _RESERVED or old.startswith(NOT_CUSTOM_PREFIXES):
-        raise WriteError(f"{old!r} is a standard or OTP field; only custom fields can be renamed")
+    _check_names(old, new)
     if old not in props:
         raise WriteError(f"{path!r} has no custom field {old!r}")
-    if new in _RESERVED or new.startswith(NOT_CUSTOM_PREFIXES) or new in props:
-        raise WriteError(f"{new!r} is reserved or already exists on {path!r}")
+    if new in props:
+        raise WriteError(f"{new!r} already exists on {path!r}")
     ops = [_Op(entry=e, ref=path, key=old, target=new, protect=_protected(e, old))]
     actions = [FixAction(entry=path, key=old, action="rename", new_key=new)]
     if not apply:

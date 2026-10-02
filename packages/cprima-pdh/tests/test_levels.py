@@ -5,29 +5,10 @@ import pytest
 from pdh_testkit.runner import pdh_runner
 from pdh_testkit.stubs import E, StubKP
 
-from cprima_pdh.schema import filter_level, level_of, parse_schemas, validate, worst_level
+from cprima_pdh.schema import filter_level, parse_schemas, validate, worst_level
 
-# --- the default level of every rule kind ------------------------------------------------------
-
-RULE_LEVELS = [
-    ("required:UserName", "ERROR"),
-    ("schema:unknown", "ERROR"),
-    ("recommended:customer_no", "WARN"),
-    ("protected:PIN", "WARN"),
-    ("unprotected:customer_no", "WARN"),
-    ("alias:serial_number", "WARN"),
-    ("closed:unknown-field", "WARN"),
-    ("expires", "WARN"),
-    ("url:https", "WARN"),          # http:// is a valid URI: a WARN at most, never an ERROR
-    ("schema:type-conflict", "WARN"),
-    ("pattern:PIN", "INFO"),
-]
-
-
-@pytest.mark.parametrize("rule,level", RULE_LEVELS, ids=[r for r, _ in RULE_LEVELS])
-def test_default_level_of_each_rule(rule, level):
-    assert level_of(rule) == level
-
+# The level of each rule is data of the profile (see test_profile_data.py); `http://` is a valid URI, so `url:https`
+# is a WARN at most, never an ERROR.
 
 # --- requirement tiers: required (MUST) -> ERROR, recommended (SHOULD) -> WARN, optional (MAY) -> nothing ----
 

@@ -1,7 +1,7 @@
 [project]
 name = "cprima-pdh"
-version = "0.0.1"
-description = "Practical Digital Housekeeping: keep your digital life in order, starting with your password database."
+version = "0.0.2"
+description = "Practical Digital Housekeeping: check and tidy your KeePass vault against a written taxonomy."
 readme = "README.md"
 requires-python = ">=3.11"
 license = "Apache-2.0"
@@ -9,7 +9,7 @@ license-files = ["LICENSE", "NOTICE"]
 authors = [{ name = "Christian Prior-Mamulyan" }]
 keywords = ["keepass", "kdbx", "password-manager", "digital-housekeeping", "pdh"]
 classifiers = [
-    "Development Status :: 1 - Planning",
+    "Development Status :: 3 - Alpha",
     "Environment :: Console",
     "Intended Audience :: End Users/Desktop",
     "Operating System :: OS Independent",

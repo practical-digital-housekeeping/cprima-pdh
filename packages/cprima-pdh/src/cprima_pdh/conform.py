@@ -14,46 +14,35 @@ def _q(text: str) -> str:
     return '"' + text.replace('"', '\\"') + '"'
 
 
-def _issue(f: RuleFinding) -> Issue:
-    kind, _, term = f.rule.partition(":")
-    fields = f.fields or ([term] if term and kind in ("required", "recommended") else [])
+def _advice(f: RuleFinding, sset: SchemaSet):
+    """The profile's advice for a finding: the most specific key wins (exact rule id, then its kind, then `default`);
+    a finding about a vocabulary term itself prefers the `@vocabulary` variant of each."""
+    kind = f.rule.partition(":")[0]
+    scoped = ["@vocabulary", ""] if f.schema_name == VOCABULARY else [""]
+    for key in (f.rule, kind):
+        for scope in scoped:
+            if key + scope in sset.advice:
+                return sset.advice[key + scope]
+    return sset.advice["default"]
+
+
+def _issue(f: RuleFinding, sset: SchemaSet) -> Issue:
+    term = f.rule.partition(":")[2]
+    fields = f.fields or ([term] if term else [])
+    advice = _advice(f, sset)
     ref = _q(f.entry)
-    action, auto, command, note = "review", False, None, f.message
 
-    if kind in ("required", "recommended"):
-        action, command = "supply-value", f'pdh edit set {ref} {term} <value> --apply'
-        note = "ask the owner for the value; never invent one"
-    elif kind == "alias":
-        action, auto = "rename-field", True
-        command = " ; ".join(f"pdh edit rename-field {ref} {old} {term} --apply" for old in fields)
-        note = f"same concept, old spelling: rename to {term}"
-    elif kind in ("protected", "unprotected"):
-        action = "protect-field" if kind == "protected" else "unprotect-field"
-        if f.schema_name == VOCABULARY:  # a vocabulary term has a fixed protection that `fix` applies everywhere
-            auto, command = True, "pdh edit vocabulary --apply"
-        else:
-            note = "toggle protection in the client, or re-enter the value with `set ... - --overwrite --protect`"
-    elif f.rule in ("closed:unknown-field", "unknown-field"):
-        action = "decide-field"
-        note = "rename each field to a vocabulary term (pdh edit rename-field), or remove it in the client"
-    elif f.rule == "url:https":
-        action = "review-url"
-        note = "http:// is a valid URI; change it only if the site really offers https"
-    elif f.rule == "expires":
-        action = "set-expiry"
-        note = "set the expiry date in the client; pdh does not write it"
-    elif f.rule == "schema:unknown":
-        action, command = "fix-schema", f"pdh edit set {ref} _schema <schema> --overwrite --apply"
-        note = "name a schema from `pdh method schemas`, or drop the field"
-    elif kind == "link":
-        action, command = "fix-link", f"pdh edit link {ref} <target> --overwrite --apply"
-        note = "point the link field at an entry with an allowed schema"
-    elif kind == "pattern":
-        action = "review-value"
-        note = "format hint only; the owner is responsible for the value"
+    def fill(text: str, field: str = "") -> str:
+        return (text.replace("{entry}", ref).replace("{term}", term).replace("{field}", field)
+                .replace("{binding}", sset.binding.field))
 
+    command = None
+    if advice.command:
+        command = (" ; ".join(fill(advice.command, x) for x in fields)
+                   if "{field}" in advice.command else fill(advice.command))
+    note = fill(advice.note) if advice.note else f.message
     return Issue(schema=f.schema_name, rule=f.rule, level=f.level, fields=fields, message=f.message,
-                 action=action, automatable=auto, command=command, note=note)
+                 action=advice.action, automatable=advice.automatable, command=command, note=note)
 
 
 def conformance(kp, sset: SchemaSet, status: str = "nonconform", only_schema: str | None = None,
@@ -68,7 +57,7 @@ def conformance(kp, sset: SchemaSet, status: str = "nonconform", only_schema: st
     listed: list[EntryConformance] = []
     for e, path, names, _unknown in _bind(kp, sset):
         ref = f"{path}/{e.title}"
-        issues = [_issue(f) for f in by_entry.get(ref, [])]
+        issues = [_issue(f, sset) for f in by_entry.get(ref, [])]
         state = "nonconform" if issues else ("conform" if names else "unclassified")
         counts[state] += 1
         if (status in ("all", state)) and (only_schema is None or only_schema in names):

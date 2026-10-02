@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Callable
 if TYPE_CHECKING:  # pykeepass is the optional `kdbx` extra
     from pykeepass import PyKeePass
 
+from .backends.kdbx import OTP_STYLES
 from .models import (
     DbMeta,
     DuplicateStats,
@@ -17,14 +18,12 @@ from .models import (
     EntryRecord,
     ExpiryStats,
     FieldStats,
-    GroupNode,
     Inventory,
     QualityStats,
     StructureStats,
 )
 from .session import load_session
 
-_OTP_PREFIXES = (("TimeOtp-", "TimeOtp"), ("HmacOtp-", "HmacOtp"))
 
 
 class OpenError(Exception):
@@ -38,10 +37,32 @@ def pykeepass_open(path: str | Path, password: str | None, keyfile: str | None) 
     return PyKeePass(str(path), password=password, keyfile=keyfile)
 
 
+def sidecar(path: Path) -> Path | None:
+    """`<vault>.toml` next to the vault if it holds a `password` (test fixtures do), else None."""
+    import tomllib
+
+    side = Path(path).with_suffix(".toml")
+    try:
+        data = tomllib.loads(side.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return side if isinstance(data.get("password"), str) else None
+
+
+def sidecar_password(path: Path) -> str | None:
+    import tomllib
+
+    side = sidecar(path)
+    return tomllib.loads(side.read_text(encoding="utf-8"))["password"] if side else None
+
+
 def open_db(path: Path, key: Path | None, prompt: Callable[[], str | None]) -> PyKeePass:
-    """Open db using the session cache if valid, else prompt() for the password."""
-    sess = load_session(path)
-    if sess:
+    """Open db with, in this order: the password in its sidecar file, the session cache, or prompt()."""
+    side_pw = sidecar_password(path)
+    sess = None if side_pw is not None else load_session(path)
+    if side_pw is not None:
+        password, keyfile = side_pw, (str(key) if key else None)
+    elif sess:
         password, sess_key = sess
         keyfile = str(key) if key else sess_key
     else:
@@ -68,7 +89,7 @@ def _gpath(group) -> str:
 def _totp_style(entry, props: dict) -> str | None:
     if entry.otp:  # pykeepass reserves "otp", so it is not in custom_properties
         return "otp"
-    for prefix, style in _OTP_PREFIXES:
+    for prefix, style in OTP_STYLES.items():
         if any(k.startswith(prefix) for k in props):
             return style
     return None
@@ -126,18 +147,6 @@ def detail(kp: PyKeePass, title: str, show_password: bool) -> EntryDetail | None
         tags=list(e.tags or []),
         custom_fields={k: str(v) for k, v in (e.custom_properties or {}).items()},
     )
-
-
-def tree(kp: PyKeePass, with_entries: bool) -> GroupNode:
-    def walk(g) -> GroupNode:
-        return GroupNode(
-            name=g.name or "/",
-            entry_count=len(g.entries),
-            entries=sorted(e.title or "" for e in g.entries) if with_entries else [],
-            children=[walk(c) for c in sorted(g.subgroups, key=lambda x: x.name or "")],
-        )
-
-    return walk(kp.root_group)
 
 
 def _age_bucket(modified: datetime | None, now: datetime) -> str:

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from .models import TaxonomyDoc
-from .schema import KINDS, FieldType, SchemaDef, SchemaSet, resolve
+from .schema import FieldType, SchemaDef, SchemaSet, resolve
 
 
 def _cell(value: object) -> str:
@@ -35,12 +35,17 @@ def _flags(d: SchemaDef) -> str:
 
 def build(sset: SchemaSet) -> TaxonomyDoc:
     m = sset.meta
+    p = sset.profile
+    source = f"the profile `{p.full_name}` (version {p.version})" if p else "the taxonomy file"
     out: list[str] = [
-        f"# {m.title}",
+        f"# {m.title}" + (f": profile {p.full_name}" if p else ""),
         "",
-        "> Generated from `schemas.toml` by `pdh method show`. Do not edit by hand: change `schemas.toml`, then run `just taxonomy`.",
+        f"> Generated from {source} by `pdh method show`. Do not edit by hand: change the profile file, then run `just taxonomy`.",
         "",
     ]
+    if p and p.description:
+        out += [f"**Profile `{p.full_name}` {p.version}** (profile `{p.name}` of the taxonomy `{p.taxonomy}`). "
+                f"{p.description}", ""]
     if m.purpose:
         out += [m.purpose.strip(), ""]
 
@@ -90,6 +95,17 @@ def build(sset: SchemaSet) -> TaxonomyDoc:
         out += ["### (no family)", ""]
         out += _table(["Schema", "Status", "Description"], [[f"`{n}`", s, d.description] for n, (d, s) in loose.items()]) + [""]
 
+    # --- field-based matching: record types that follow from the fields an entry has
+    if sset.matches:
+        by_type: dict[str, list[str]] = {}
+        for m in sset.matches:
+            by_type.setdefault(m.schema_name, []).append(" and ".join(f"`{f}`" for f in m.has))
+        out += ["## Field-based matching", "",
+                "A record type can also follow from the fields an entry has, with or without a `_schema`: the types of "
+                "an entry are the union of both. A rule fires when an entry has every listed field (non-empty).", ""]
+        out += _table(["Record type", "Bound when an entry has"],
+                      [[f"`{n}`", " or ".join(alts)] for n, alts in by_type.items()]) + [""]
+
     # --- facets
     if sset.facets:
         out += ["## Facets (reusable bundles)", ""]
@@ -104,18 +120,36 @@ def build(sset: SchemaSet) -> TaxonomyDoc:
         header = ["Facet", "Description", "Required"] + (["Recommended"] if rec else []) + ["Optional", "Flags"]
         out += _table(header, rows) + [""]
 
+    # --- finding levels and standard fields
+    lv = sset.levels
+    out += ["## Finding levels", "",
+            "Findings carry a level, like log levels. An exact rule id wins over its kind (the part before the "
+            f"colon), which wins over the default (`{lv.default}`).", ""]
+    out += _table(["Rule or kind", "Level"], [[f"`{r}`", lvl] for r, lvl in lv.by_rule.items()]) + [""]
+    out += ["## Advice", "",
+            "What `pdh check conform` suggests per finding; the most specific key wins. `auto` = an agent may run the "
+            "command without asking the owner.", ""]
+    out += _table(["Rule or kind", "Action", "Auto", "Command", "Note"],
+                  [[f"`{k}`", a.action, "yes" if a.automatable else "no", f"`{a.command}`" if a.command else "—",
+                    a.note or "the finding's message"] for k, a in sset.advice.items()]) + [""]
+    if sset.standard:
+        out += ["## Standard fields", "",
+                "What every entry has. How a store keeps them is the backend's business.", ""]
+        out += _table(["Field", "Kind", "Meaning"],
+                      [[f"`{n}`", s.kind, s.description] for n, s in sset.standard.items()]) + [""]
+
     # --- kinds and vocabulary
     if sset.kinds:
         out += ["## Field kinds", ""]
         out += _table(["Kind", "Meaning", "1Password type", "Normal protection"],
                       [[f"`{k}`", sset.kinds[k].description, sset.kinds[k].onepassword,
                         {True: "protected", False: "not protected", None: "—"}[sset.kinds[k].default_protected]]
-                       for k in KINDS if k in sset.kinds]) + [""]
+                       for k in sset.kinds]) + [""]
 
     terms = {**{n: (t, "implemented") for n, t in sset.fields.items()},
              **{n: (t, "proposed") for n, t in sset.proposed_fields.items()}}
     out += ["## Field vocabulary", ""]
-    for kind in [*KINDS, None]:
+    for kind in [*sset.kinds, None]:
         members = {n: v for n, v in terms.items() if v[0].kind == kind}
         if not members:
             continue

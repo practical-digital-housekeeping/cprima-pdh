@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable
 
+from .backends.kdbx import STANDARD_ATTR, STANDARD_PROTECTED
 from .models import Change
 from .schema import make_ref, uuid_key
 from .source import _gpath, pykeepass_open
@@ -13,7 +14,6 @@ from .source import _gpath, pykeepass_open
 if TYPE_CHECKING:
     from pykeepass import PyKeePass
 
-_STANDARD_ATTR = {"Title": "title", "UserName": "username", "Password": "password", "URL": "url", "Notes": "notes"}
 _HIDDEN = "(hidden)"
 
 
@@ -39,24 +39,20 @@ def find_entry(kp: PyKeePass, path: str, username: str | None = None):
 def _is_protected(e, field: str, protect: bool) -> bool:
     return (
         protect
-        or field in ("Password", "otp")
+        or field in STANDARD_PROTECTED
         or bool(e._element.xpath("boolean(String[Key=$k]/Value[@Protected='True'])", k=field))
     )
 
 
 def _get(e, field: str) -> str:
-    if field in _STANDARD_ATTR:
-        return getattr(e, _STANDARD_ATTR[field]) or ""
-    if field == "otp":
-        return e.otp or ""
+    if field in STANDARD_ATTR:
+        return getattr(e, STANDARD_ATTR[field]) or ""
     return e.get_custom_property(field) or ""
 
 
 def _put(e, field: str, value: str, protect: bool) -> None:
-    if field in _STANDARD_ATTR:
-        setattr(e, _STANDARD_ATTR[field], value)
-    elif field == "otp":
-        e.otp = value
+    if field in STANDARD_ATTR:
+        setattr(e, STANDARD_ATTR[field], value)
     else:
         e.set_custom_property(field, value, protect=protect)
 

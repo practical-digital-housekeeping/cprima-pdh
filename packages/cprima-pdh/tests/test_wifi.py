@@ -48,7 +48,7 @@ CASES = [
         protected=("wifi_key", "ssh_key")), set()),
     ("openwrt-with-password-login-only", ap({}, schema="openwrt-device", username="root"), set()),
     ("openwrt-ssh-key-must-be-protected", ap({"ssh_key": "KEY"}, schema="openwrt-device", protected=()),
-     {("vocabulary", "protected:key_material", "WARN")}),
+     {("vocabulary", "protected:ssh_key", "WARN")}),  # `ssh_key` is a term of its own (not the name pattern)
     ("openwrt-without-admin-password-is-a-warning", ap({}, schema="openwrt-device", password=""),
      {("openwrt-device", "recommended:Password", "WARN")}),
     ("openwrt-without-a-url-is-a-warning", ap({}, schema="openwrt-device", url=""),

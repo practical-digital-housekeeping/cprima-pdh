@@ -15,11 +15,13 @@ from __future__ import annotations
 import re
 import tomllib
 from collections import Counter
+from functools import lru_cache
+from importlib.resources import files
 from pathlib import Path
-from typing import TYPE_CHECKING, Iterator, Literal, get_args
+from typing import TYPE_CHECKING, Iterator, Literal, NamedTuple
 
 from lxml import etree
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 if TYPE_CHECKING:  # pykeepass is the optional `kdbx` extra; it is only needed to open a vault
     from pykeepass import PyKeePass
@@ -41,12 +43,11 @@ from .models import (
     ValidationReport,
     ValidationSummary,
 )
+from .backends.kdbx import OTP_PREFIXES, STANDARD_ATTR, STANDARD_PROTECTED
 from .source import _gpath, _in_bin
 
-STANDARD_FIELDS = ("Title", "UserName", "Password", "URL", "Notes")
-OTP_PREFIXES = ("TimeOtp-", "HmacOtp-")  # KeePass 2 OTP plugin fields; `otp` itself is allowed by name
-SCHEMA_FIELD = "_schema"  # custom field on an entry: comma-separated schema names
-SCHEMA_PSEUDO = "schema-field"  # pseudo-schema name for findings about the _schema field itself
+DEFAULT_PROFILE = "pdh-default"  # the profile whose [level] and [standard] a taxonomy fragment inherits
+SCHEMA_PSEUDO = "schema-field"  # pseudo-schema name for findings about the binding field itself
 _LOWER = "translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz')"
 
 
@@ -58,8 +59,6 @@ class _Strict(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-Kind = Literal["text", "secret", "key", "identifier", "card", "phone", "email", "address", "url", "date", "otp", "link"]
-KINDS: tuple[str, ...] = get_args(Kind)
 # implemented = active in validation; proposed = documented in the taxonomy only, ignored by every check
 Maturity = Literal["implemented", "proposed"]
 
@@ -75,18 +74,20 @@ class FieldType(_Strict):
     """
 
     description: str = ""
-    kind: Kind | None = None
+    kind: str | None = None  # one of the taxonomy's `[kind.*]`
     family: list[str] = []  # schema families this term mostly belongs to (documentation)
     status: Maturity = "implemented"
     aliases: list[str] = []  # exact, case-sensitive alternate spellings
     match: str | None = None  # regex searched in the field name
     pattern: str | None = None  # the value must match completely (name/aliases only)
     protected: bool | None = None
+    example: str | None = None  # an obviously fake value for samples and docs; must fit `pattern`; else the kind's
 
 
 class SchemaDef(_Strict):
     description: str = ""
     family: str | None = None  # taxonomy family of a record type (documentation)
+    area: str | None = None  # the `[area.*]` where entries of this record type belong by default
     status: Maturity = "implemented"
     facets: list[str] = []
     required: list[str] = []  # MUST: a missing field is an ERROR
@@ -113,6 +114,8 @@ class KindDef(_Strict):
     description: str
     onepassword: str | None = None  # the 1Password field type this kind emulates
     default_protected: bool | None = None  # documentation: what protection this kind normally has
+    behaviour: Literal["link"] | None = None  # the one thing the engine does with a kind: `link` = holds an entry reference
+    example: str | None = None  # an obviously fake value for terms of this kind that have none of their own
 
 
 class AxisDef(_Strict):
@@ -134,6 +137,76 @@ class SourceDef(_Strict):
     url: str
 
 
+class Levels(_Strict):
+    """Severity of findings, by rule: an exact rule id (`schema:unknown`), else its kind (`required`), else `default`."""
+
+    default: Level = "WARN"
+    by_rule: dict[str, Level] = {}
+
+    def of(self, rule_id: str) -> Level:
+        if rule_id in self.by_rule:
+            return self.by_rule[rule_id]
+        return self.by_rule.get(rule_id.split(":")[0], self.default)
+
+
+class StandardDef(_Strict):
+    """A standard field every entry has (title, user name, password, ...). How the store keeps it is the backend's."""
+
+    kind: str  # one of the taxonomy's `[kind.*]`
+    description: str = ""
+    example: str | None = None  # an obviously fake value; else the kind's
+
+
+class AdviceDef(_Strict):
+    """What to do about a finding. The key is a rule id (`required:URL`), a rule kind (`required`) or either with
+    `@vocabulary` (a finding about a vocabulary term itself); `default` covers the rest.
+
+    `command` is a template: `{entry}` is the quoted entry path, `{term}` the term after the colon of the rule id,
+    `{field}` each field the finding names (the command is repeated per field, joined by ` ; `). `note` may use
+    `{term}`; without a note the finding's own message is the note.
+    """
+
+    action: str
+    automatable: bool = False  # True: an agent may run `command` without asking the owner
+    command: str | None = None
+    note: str | None = None
+
+
+class BindingDef(_Strict):
+    """How an entry names its record types: a custom field holding comma-separated record type names."""
+
+    field: str = Field(min_length=1)
+
+
+class MatchDef(_Strict):
+    """A field-based rule: an entry that has every field in `has` (non-empty) is of record type `schema`.
+
+    It works next to an explicit `_schema`: the types of an entry are the union of both.
+    """
+
+    schema_name: str = Field(alias="schema")
+    has: list[str] = Field(min_length=1)
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+
+class ProfileMeta(_Strict):
+    """Identity of a profile: one complete variant of a taxonomy; a vault follows exactly one.
+
+    `taxonomy` names the taxonomy (for example `pdh`), `name` the profile within it (`default`); together they are the
+    full name `pdh-default`, by which the profile is selected (`--profile`), configured and filed (`pdh-default.toml`).
+    """
+
+    taxonomy: str = Field(pattern=r"^[a-z0-9]+(-[a-z0-9]+)*$")
+    name: str = Field(pattern=r"^[a-z0-9]+(-[a-z0-9]+)*$")
+    version: str
+    description: str = ""
+
+    @property
+    def full_name(self) -> str:
+        return f"{self.taxonomy}-{self.name}"
+
+
 class TaxonomyMeta(_Strict):
     title: str = "Taxonomy"
     purpose: str = ""
@@ -150,6 +223,12 @@ class SchemaSet(BaseModel):
     schemas: dict[str, SchemaDef]
     proposed_fields: dict[str, FieldType] = {}
     proposed_schemas: dict[str, SchemaDef] = {}
+    profile: ProfileMeta | None = None
+    levels: Levels = Levels()
+    standard: dict[str, StandardDef] = {}
+    advice: dict[str, AdviceDef] = {}
+    binding: BindingDef = BindingDef(field="binding")  # complete profiles state it; fragments inherit the default's
+    matches: list[MatchDef] = []
     meta: TaxonomyMeta = TaxonomyMeta()
     areas: dict[str, AreaDef] = {}
     families: dict[str, FamilyDef] = {}
@@ -158,8 +237,43 @@ class SchemaSet(BaseModel):
     decisions: list[DecisionDef] = []
     sources: list[SourceDef] = []
 
+    def is_link(self, term: str) -> bool:
+        """Whether a vocabulary term is of a kind that holds an entry reference (decided by the kind's `behaviour`)."""
+        ft = self.fields.get(term) or self.proposed_fields.get(term)
+        kind = self.kinds.get(ft.kind) if ft and ft.kind else None
+        return bool(kind and kind.behaviour == "link")
 
-_SECTIONS = {"field", "facet", "schema", "taxonomy", "area", "family", "kind", "axis", "decision", "source"}
+    def example_of(self, term: str) -> str | None:
+        """An obviously fake value for a vocabulary term: its own `example`, else its kind's."""
+        ft = self.fields.get(term) or self.proposed_fields.get(term)
+        if ft is None:
+            return None
+        return ft.example or (self.kinds[ft.kind].example if ft.kind in self.kinds else None)
+
+    def example_of_standard(self, name: str) -> str | None:
+        sd = self.standard.get(name)
+        return None if sd is None else sd.example or self.kinds[sd.kind].example
+
+
+_SECTIONS = {"profile", "level", "standard", "advice", "binding", "match", "field", "facet", "schema", "taxonomy", "area", "family", "kind",
+             "axis", "decision", "source"}
+
+
+@lru_cache(maxsize=1)
+def _default_tables() -> dict:
+    """The raw [level], [standard] and [kind] tables of the default profile: what a fragment that omits them gets.
+
+    Complete profiles state all three themselves (a test enforces it); only fragments, such as the small taxonomies of
+    unit tests, inherit. Read as plain TOML, so there is no recursion into the loader."""
+    text = (files("cprima_pdh") / "data" / "profiles" / f"{DEFAULT_PROFILE}.toml").read_text(encoding="utf-8")
+    raw = tomllib.loads(text)
+    return {"level": raw["level"], "standard": raw["standard"], "kind": raw["kind"], "advice": raw["advice"],
+            "binding": raw["binding"]}
+
+
+def _levels(table: dict) -> Levels:
+    table = dict(table)
+    return Levels(default=table.pop("default", "WARN"), by_rule=table)
 
 
 def parse_schemas(text: str, source: str = "<string>") -> SchemaSet:
@@ -177,10 +291,18 @@ def parse_schemas(text: str, source: str = "<string>") -> SchemaSet:
             schemas={n: s for n, s in schemas.items() if s.status == "implemented"},
             proposed_fields={n: f for n, f in fields.items() if f.status == "proposed"},
             proposed_schemas={n: s for n, s in schemas.items() if s.status == "proposed"},
+            profile=ProfileMeta(**raw["profile"]) if "profile" in raw else None,
+            levels=_levels(raw["level"] if "level" in raw else _default_tables()["level"]),
+            standard={n: StandardDef(**b) for n, b in (raw["standard"] if "standard" in raw
+                                                       else _default_tables()["standard"]).items()},
+            advice={n: AdviceDef(**b) for n, b in (raw["advice"] if "advice" in raw
+                                                   else _default_tables()["advice"]).items()},
+            binding=BindingDef(**(raw["binding"] if "binding" in raw else _default_tables()["binding"])),
+            matches=[MatchDef(**m) for m in raw.get("match", [])],
             meta=TaxonomyMeta(**raw.get("taxonomy", {})),
             areas={n: AreaDef(**b) for n, b in raw.get("area", {}).items()},
             families={n: FamilyDef(**b) for n, b in raw.get("family", {}).items()},
-            kinds={n: KindDef(**b) for n, b in raw.get("kind", {}).items()},
+            kinds={n: KindDef(**b) for n, b in (raw["kind"] if "kind" in raw else _default_tables()["kind"]).items()},
             axes=[AxisDef(**b) for b in raw.get("axis", [])],
             decisions=[DecisionDef(**b) for b in raw.get("decision", [])],
             sources=[SourceDef(**b) for b in raw.get("source", [])],
@@ -200,6 +322,14 @@ def load_schemas(path: Path) -> SchemaSet:
 
 
 def _check(sset: SchemaSet) -> None:
+    if "default" not in sset.advice:
+        raise SchemaError("advice: a taxonomy that states [advice.*] needs [advice.default]")
+    for n, ft in {**sset.fields, **sset.proposed_fields}.items():
+        if ft.kind is not None and ft.kind not in sset.kinds:
+            raise SchemaError(f"field.{n}: unknown kind {ft.kind!r}")
+    for n, sd in sset.standard.items():
+        if sd.kind not in sset.kinds:
+            raise SchemaError(f"standard.{n}: unknown kind {sd.kind!r}")
     claimed: dict[str, str] = {}
     for n, ft in {**sset.fields, **sset.proposed_fields}.items():  # a proposal must not clash with a live term
         for attr in ("pattern", "match"):
@@ -208,6 +338,8 @@ def _check(sset: SchemaSet) -> None:
                     re.compile(getattr(ft, attr))
                 except re.error as exc:
                     raise SchemaError(f"field.{n}: bad {attr}: {exc}") from exc
+        if ft.pattern and ft.example and not re.fullmatch(ft.pattern, ft.example):
+            raise SchemaError(f"field.{n}: the example does not fit the pattern")
         for name in [n, *ft.aliases]:
             if name in claimed and claimed[name] != n:
                 raise SchemaError(f"field name {name!r} is claimed by both {claimed[name]!r} and {n!r}")
@@ -220,20 +352,25 @@ def _check(sset: SchemaSet) -> None:
             for f, t in d.types.items():
                 if t not in sset.fields:
                     raise SchemaError(f"{kind}.{n}: field {f!r} has unknown type {t!r}")
+    for m in sset.matches:
+        if m.schema_name not in sset.schemas:  # a proposed or unknown type could never be satisfied
+            raise SchemaError(f"match rule for {m.schema_name!r}: not an active schema")
     for d in sset.schemas.values():
         resolve(d, sset.facets)  # detects cycles
     for kind_, table in (("facet", sset.facets), ("schema", {**sset.schemas, **sset.proposed_schemas})):
         for n, d in table.items():
             for fld, targets in d.links.items():
-                term = sset.fields.get(fld) or sset.proposed_fields.get(fld)
-                if term is None or term.kind != "link":
-                    raise SchemaError(f"{kind_}.{n}: link field {fld!r} must be a vocabulary term of kind 'link'")
+                if not sset.is_link(fld):
+                    raise SchemaError(f"{kind_}.{n}: link field {fld!r} must be a vocabulary term of a kind "
+                                      f"with behaviour 'link'")
                 for t in targets:
                     if t not in sset.schemas:  # a proposed or unknown schema could never be satisfied
                         raise SchemaError(f"{kind_}.{n}: link {fld!r} targets {t!r}, which is not an active schema")
     for n, d in {**sset.schemas, **sset.proposed_schemas}.items():
         if d.family is not None and d.family not in sset.families:
             raise SchemaError(f"schema.{n}: unknown family {d.family!r}")
+        if d.area is not None and d.area not in sset.areas:
+            raise SchemaError(f"schema.{n}: unknown area {d.area!r}")
     for n, ft in {**sset.fields, **sset.proposed_fields}.items():
         for fam in ft.family:
             if fam not in sset.families:
@@ -287,45 +424,32 @@ def _effective_protected(d: SchemaDef, fields: dict[str, FieldType]) -> list[str
     return _union(d.protected, typed)
 
 
-def closed_rule(d: SchemaDef) -> CompiledRule:
-    """Flags every field that is not standard, OTP, `_schema`, or allowed by `d` (required/optional/typed/alias)."""
+def closed_rule(d: SchemaDef, sset: SchemaSet) -> CompiledRule:
+    """Flags every field that is not standard, OTP, the binding field, or allowed by `d` (required/optional/typed/alias)."""
     alias_names = [a for alts in d.aliases.values() for a in alts]
     allowed = (
-        set(STANDARD_FIELDS) | {"otp", SCHEMA_FIELD} | set(d.required) | set(d.recommended) | set(d.optional)
+        set(sset.standard) | {sset.binding.field} | set(d.required) | set(d.recommended) | set(d.optional)
         | set(d.protected) | set(d.types) | set(d.links) | set(alias_names)
     )
     cond = " and ".join(
         [f"not(Key={_q(a)})" for a in sorted(allowed)] + [f"not(starts-with(Key, '{p}'))" for p in OTP_PREFIXES]
     )
-    return CompiledRule(id="closed:unknown-field", level=level_of("closed:unknown-field"),
+    return CompiledRule(id="closed:unknown-field", level=sset.levels.of("closed:unknown-field"),
                         message="field not in schema", xpath=f"String[{cond}]")
 
 
-def level_of(rule_id: str) -> Level:
-    """Default level of a rule: required / unknown schema = ERROR, pattern hints = INFO, everything else = WARN.
-
-    `http://` is a valid URI, so `url:https` is only ever a WARN. Requirement tiers on the schema side map to
-    levels: `required` (MUST) -> ERROR, `recommended` (SHOULD) -> WARN, `optional` (MAY) -> no finding.
-    """
-    kind = rule_id.split(":")[0]
-    if kind == "required" or rule_id in ("schema:unknown", "link:invalid", "link:dangling", "link:self"):
-        return "ERROR"
-    if kind == "pattern" or rule_id == "link:target-unclassified":
-        return "INFO"
-    return "WARN"  # includes link:wrong-schema
-
-
-def compile_rules(d: SchemaDef, fields: dict[str, FieldType], include_closed: bool = True) -> list[CompiledRule]:
+def compile_rules(d: SchemaDef, sset: SchemaSet, include_closed: bool = True) -> list[CompiledRule]:
+    """The structural rules of one (flattened) schema. Levels and standard fields come from the taxonomy `sset`."""
     rules: list[CompiledRule] = []
 
     def add(rule_id: str, message: str, xpath: str) -> None:
-        rules.append(CompiledRule(id=rule_id, level=level_of(rule_id), message=message, xpath=xpath))
+        rules.append(CompiledRule(id=rule_id, level=sset.levels.of(rule_id), message=message, xpath=xpath))
 
     for f in d.required:
         add(f"required:{f}", f"missing or empty field {f}", f"not({_has_value(f)})")
     for f in d.recommended:
         add(f"recommended:{f}", f"missing recommended field {f}", f"not({_has_value(f)})")
-    for f in _effective_protected(d, fields):
+    for f in _effective_protected(d, sset.fields):
         add(f"protected:{f}", f"field {f} should be protected",
             f"String[Key={_q(f)}][Value[normalize-space() and not(@Protected='True')]]")
     if d.https_only:
@@ -337,7 +461,7 @@ def compile_rules(d: SchemaDef, fields: dict[str, FieldType], include_closed: bo
         cond = " or ".join(f"Key={_q(a)}" for a in alts)
         add(f"alias:{canon}", f"rename to {canon}", f"String[{cond}]")
     if d.closed and include_closed:
-        rules.append(closed_rule(d))
+        rules.append(closed_rule(d, sset))
     return rules
 
 
@@ -350,9 +474,9 @@ def describe(sset: SchemaSet) -> SchemaRules:
     views = {}
     for n, d in sset.schemas.items():
         flat = resolve(d, sset.facets)
-        rules = compile_rules(flat, sset.fields)
+        rules = compile_rules(flat, sset)
         rules += [
-            CompiledRule(id=f"pattern:{f}", level=level_of("pattern"), message=f"value does not match type {t}",
+            CompiledRule(id=f"pattern:{f}", level=sset.levels.of("pattern"), message=f"value does not match type {t}",
                          xpath=f"(python) re.fullmatch({rx.pattern!r}, value)")
             for f, t, rx in pattern_checks(flat, sset.fields)
         ]
@@ -371,7 +495,6 @@ def describe(sset: SchemaSet) -> SchemaRules:
 
 
 VOCABULARY = "vocabulary"  # pseudo-schema name for findings from the global vocabulary
-NOT_CUSTOM_PREFIXES = ("TimeOtp-", "HmacOtp-")
 
 
 def vocabulary_index(fields: dict[str, FieldType]):
@@ -398,8 +521,8 @@ def _schema_fields(d: SchemaDef) -> set[str]:
             *(a for alts in d.aliases.values() for a in alts)}
 
 
-def _vocabulary_findings(e, ref: str, exact, matchers, skip: set[tuple[str, str, str]],
-                         known: set[str] = frozenset()) -> list[RuleFinding]:
+def _vocabulary_findings(e, ref: str, exact, matchers, skip: set[tuple[str, str, str]], levels: Levels,
+                         known: set[str] = frozenset(), binding: str = "") -> list[RuleFinding]:
     """Findings per field; rule ids carry the vocabulary *term*, so summaries stay short.
 
     `skip` holds (entry, kind, field) triples the entry's schema already reported. `known` are the fields
@@ -412,15 +535,15 @@ def _vocabulary_findings(e, ref: str, exact, matchers, skip: set[tuple[str, str,
     def add(kind: str, term: str, message: str, key: str) -> None:
         if (ref, kind, key) not in skip:
             rule = f"{kind}:{term}"
-            out.append(RuleFinding(schema=VOCABULARY, entry=ref, rule=rule, level=level_of(rule),
+            out.append(RuleFinding(schema=VOCABULARY, entry=ref, rule=rule, level=levels.of(rule),
                                    message=message, fields=[key]))
 
     for key in (e.custom_properties or {}):
-        if key.startswith(NOT_CUSTOM_PREFIXES):
+        if key.startswith(OTP_PREFIXES):  # the KeePass 2 OTP plugin's own fields are not user fields
             continue
         found = lookup_term(key, exact, matchers)
         if found is None:
-            if (exact or matchers) and key != SCHEMA_FIELD and key not in known and (ref, "closed", key) not in skip:
+            if (exact or matchers) and key != binding and key not in known and (ref, "closed", key) not in skip:
                 unknown.append(key)
             continue
         name, ft, by_name = found
@@ -436,7 +559,7 @@ def _vocabulary_findings(e, ref: str, exact, matchers, skip: set[tuple[str, str,
             if value and not re.fullmatch(ft.pattern, value):
                 add("pattern", name, f"value does not match type {name}", key)
     if unknown:
-        out.append(RuleFinding(schema=VOCABULARY, entry=ref, rule="unknown-field", level=level_of("unknown-field"),
+        out.append(RuleFinding(schema=VOCABULARY, entry=ref, rule="unknown-field", level=levels.of("unknown-field"),
                                message="field name not in the vocabulary (unsupported)", fields=sorted(unknown)))
     return out
 
@@ -495,7 +618,8 @@ def _resolve_link(e, raw: str, targets: list[str], index: dict) -> tuple[str, st
     return "ok", ref
 
 
-def _link_findings(e, ref: str, names: list[str], flat: dict[str, SchemaDef], index: dict) -> list[RuleFinding]:
+def _link_findings(e, ref: str, names: list[str], flat: dict[str, SchemaDef], index: dict,
+                   levels: Levels) -> list[RuleFinding]:
     """Findings for the link fields of the schemas an entry names. An absent field is a `required` question."""
     out: list[RuleFinding] = []
     for n in names:
@@ -506,7 +630,7 @@ def _link_findings(e, ref: str, names: list[str], flat: dict[str, SchemaDef], in
             status, _target = _resolve_link(e, raw, targets, index)
             if status != "ok":
                 rule = f"link:{status}"
-                out.append(RuleFinding(schema=n, entry=ref, rule=rule, level=level_of(rule),
+                out.append(RuleFinding(schema=n, entry=ref, rule=rule, level=levels.of(rule),
                                        message=_LINK_MESSAGES[status], fields=[fld]))
     return out
 
@@ -521,36 +645,67 @@ def parse_schema_names(raw: str | None, known: set[str] | dict) -> tuple[list[st
     return [n for n in seen if n in known], [n for n in seen if n not in known]
 
 
+class Typing(NamedTuple):
+    """How an entry got its record types. `explicit` come from its `_schema`, `by_fields` from the profile's match
+    rules for types it did not name itself; `unknown` are `_schema` names the profile does not have."""
+
+    explicit: list[str]
+    by_fields: list[str]
+    unknown: list[str]
+
+    @property
+    def names(self) -> list[str]:
+        """Every record type that applies to the entry: the union, explicit ones first."""
+        return [*self.explicit, *self.by_fields]
+
+
+def present_fields(e, binding: str) -> set[str]:
+    """Names of the fields an entry has with a value (standard and custom; never a value itself)."""
+    out = {name for name, attr in STANDARD_ATTR.items() if getattr(e, attr, None)}
+    out.update(k for k, v in (e.custom_properties or {}).items() if v and k != binding)
+    return out
+
+
+def typing_of(e, sset: SchemaSet) -> Typing:
+    """`_schema` and/or the profile's field-based match rules: the entry's types are the union of both."""
+    explicit, unknown = parse_schema_names(e.get_custom_property(sset.binding.field), sset.schemas)
+    by_fields: list[str] = []
+    if sset.matches:
+        have = present_fields(e, sset.binding.field)
+        for m in sset.matches:
+            if m.schema_name not in explicit and m.schema_name not in by_fields and set(m.has) <= have:
+                by_fields.append(m.schema_name)
+    return Typing(explicit, by_fields, unknown)
+
+
 def _bind(kp: PyKeePass, sset: SchemaSet) -> Iterator[tuple[object, str, list[str], list[str]]]:
-    """Yield (entry, group path, known schema names, unknown names) for every live entry."""
+    """Yield (entry, group path, record types that apply, unknown `_schema` names) for every live entry."""
     rb = kp.recyclebin_group
     bin_uuid = rb.uuid if rb is not None else None
     for e in kp.entries:
         if bin_uuid is not None and _in_bin(e.group, bin_uuid):
             continue
-        names, unknown = parse_schema_names(e.get_custom_property(SCHEMA_FIELD), sset.schemas)
-        yield e, _gpath(e.group), names, unknown
-
-
-_STANDARD_ATTR = {"Title": "title", "UserName": "username", "Password": "password", "URL": "url", "Notes": "notes"}
+        t = typing_of(e, sset)
+        yield e, _gpath(e.group), t.names, t.unknown
 
 
 def _value(e, key: str) -> str:
-    if key in _STANDARD_ATTR:
-        return getattr(e, _STANDARD_ATTR[key]) or ""
+    if key in STANDARD_ATTR:  # a standard field: the KeePass attribute that holds it (the kdbx backend's mapping)
+        return getattr(e, STANDARD_ATTR[key]) or ""
     return e.get_custom_property(key) or ""
 
 
 def _is_protected(e, key: str, schema_protected: list[str]) -> bool:
     return (
-        key == "Password"
+        key in STANDARD_PROTECTED
         or key in schema_protected
         or bool(e._element.xpath("boolean(String[Key=$k]/Value[@Protected='True'])", k=key))
     )
 
 
 def _combined_findings(
-    e, ref: str, names: list[str], flat: dict[str, SchemaDef], closed_xp: dict[tuple[str, ...], tuple]
+    e, ref: str, names: list[str], flat: dict[str, SchemaDef], closed_xp: dict[tuple[str, ...], tuple],
+    sset: SchemaSet,
 ) -> list[RuleFinding]:
     """Findings that only exist when several schemas apply together: `closed` over the union, type conflicts."""
     label = "+".join(names)
@@ -562,7 +717,7 @@ def _combined_findings(
             merged = applied[0]
             for d in applied[1:]:
                 merged = _merge(merged, d)
-            rule = closed_rule(merged)
+            rule = closed_rule(merged, sset)
             closed_xp[key] = (rule, etree.XPath(rule.xpath))
         rule, xp = closed_xp[key]
         hits = [x.findtext("Key") or "" for x in xp(e._element)]
@@ -576,7 +731,8 @@ def _combined_findings(
                 typed.setdefault(field, set()).add(t)
         for field, ts in sorted(typed.items()):
             if len(ts) > 1:
-                out.append(RuleFinding(schema=label, entry=ref, rule="schema:type-conflict", level="WARN",
+                out.append(RuleFinding(schema=label, entry=ref, rule="schema:type-conflict",
+                                       level=sset.levels.of("schema:type-conflict"),
                                        message=f"schemas type this field differently ({', '.join(sorted(ts))})",
                                        fields=[field]))
     return out
@@ -585,10 +741,11 @@ def _combined_findings(
 def validate(kp: PyKeePass, sset: SchemaSet) -> ValidationReport:
     flat = {n: resolve(d, sset.facets) for n, d in sset.schemas.items()}
     xpaths = {
-        n: [(r, etree.XPath(r.xpath)) for r in compile_rules(d, sset.fields, include_closed=False)]
+        n: [(r, etree.XPath(r.xpath)) for r in compile_rules(d, sset, include_closed=False)]
         for n, d in flat.items()
     }
     patterns = {n: pattern_checks(d, sset.fields) for n, d in flat.items()}
+    levels = sset.levels
     closed_xp: dict[tuple[str, ...], tuple] = {}
 
     exact, matchers = vocabulary_index(sset.fields)
@@ -602,13 +759,15 @@ def validate(kp: PyKeePass, sset: SchemaSet) -> ValidationReport:
         ref = f"{path}/{e.title}"
         first = len(findings)
         for u in unknown:
-            findings.append(RuleFinding(schema=SCHEMA_PSEUDO, entry=ref, rule="schema:unknown", level="ERROR",
-                                        message=f"unknown schema name in {SCHEMA_FIELD}", fields=[u]))
+            findings.append(RuleFinding(schema=SCHEMA_PSEUDO, entry=ref, rule="schema:unknown",
+                                        level=levels.of("schema:unknown"),
+                                        message=f"unknown schema name in {sset.binding.field}", fields=[u]))
         if not names:
             unclassified += 1
         else:
-            hits = {n: _check_schema(e, ref, n, xpaths, patterns, findings) for n in names}
-            combined = _combined_findings(e, ref, names, flat, closed_xp) + _link_findings(e, ref, names, flat, index)
+            hits = {n: _check_schema(e, ref, n, xpaths, patterns, findings, levels) for n in names}
+            combined = (_combined_findings(e, ref, names, flat, closed_xp, sset)
+                        + _link_findings(e, ref, names, flat, index, levels))
             findings += combined
             for n in names:
                 counts[n][0] += 1
@@ -624,7 +783,7 @@ def validate(kp: PyKeePass, sset: SchemaSet) -> ValidationReport:
         # vocabulary applies to every entry; skip what the entry's schemas already reported
         seen = {(ref, f.rule.split(":")[0], k) for f in findings[first:] for k in f.fields}
         known = set().union(*(_schema_fields(flat[n]) for n in names)) if names else set()
-        vf = _vocabulary_findings(e, ref, exact, matchers, seen, known)
+        vf = _vocabulary_findings(e, ref, exact, matchers, seen, levels, known, sset.binding.field)
         findings += vf
         vocab[0] += 1
         vocab[1] += not vf
@@ -636,7 +795,7 @@ def validate(kp: PyKeePass, sset: SchemaSet) -> ValidationReport:
     return ValidationReport(schemas=stats, unclassified_entries=unclassified, findings=findings)
 
 
-def _check_schema(e, ref, name, xpaths, patterns, findings) -> int:
+def _check_schema(e, ref, name, xpaths, patterns, findings, levels: Levels) -> int:
     """Run one entry through one schema's XPath rules and value patterns; returns the number of hits."""
     hits = 0
     for rule, xp in xpaths[name]:
@@ -653,7 +812,7 @@ def _check_schema(e, ref, name, xpaths, patterns, findings) -> int:
         value = _value(e, field)  # compared in memory, never reported
         if value and not rx.fullmatch(value):
             hits += 1
-            findings.append(RuleFinding(schema=name, entry=ref, rule=f"pattern:{field}", level=level_of("pattern"),
+            findings.append(RuleFinding(schema=name, entry=ref, rule=f"pattern:{field}", level=levels.of("pattern"),
                                         message=f"value does not match type {type_name}", fields=[field]))
     return hits
 

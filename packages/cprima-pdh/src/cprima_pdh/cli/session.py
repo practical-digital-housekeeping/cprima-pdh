@@ -7,13 +7,19 @@ import typer
 
 from .. import session as session_mod
 from .. import source
+from ..models import SessionState
+from ..render import Format
 from . import _common as c
 
 app = typer.Typer(no_args_is_help=True, help="Unlock once, then work without prompts.")
 
 
 @app.command()
-def unlock(ctx: typer.Context, minutes: Annotated[int, typer.Option(help="Session lifetime.")] = 30) -> None:
+def unlock(
+    ctx: typer.Context,
+    fmt: c.Fmt = Format.text,
+    minutes: Annotated[int, typer.Option(help="Session lifetime.")] = 30,
+) -> None:
     """Prompt once and cache the credentials so later commands don't ask."""
     st = c.state(ctx)
     db = c.require_db(st)
@@ -24,19 +30,20 @@ def unlock(ctx: typer.Context, minutes: Annotated[int, typer.Option(help="Sessio
     except Exception as exc:
         c.fail(f"open failed: {exc}", 1)
     session_mod.save_session(db, password, st.key, minutes)
-    typer.echo(f"unlocked for {minutes} min", err=True)
+    c.emit(SessionState(action="unlocked", unlocked=True, minutes=minutes, seconds_left=minutes * 60), fmt)
 
 
 @app.command()
-def lock() -> None:
+def lock(fmt: c.Fmt = Format.text) -> None:
     """Discard the cached session."""
-    typer.echo("locked" if session_mod.lock() else "no session", err=True)
+    done = session_mod.lock()
+    c.emit(SessionState(action="locked" if done else "no-session", unlocked=False), fmt)
 
 
 @app.command()
-def status() -> None:
+def status(fmt: c.Fmt = Format.text) -> None:
     """Show session state (exit 1 when locked)."""
     left = session_mod.seconds_left()
+    c.emit(SessionState(action="status", unlocked=bool(left), seconds_left=left), fmt)
     if not left:
-        c.fail("locked", 1)
-    typer.echo(f"unlocked, {left // 60}m{left % 60:02d}s left", err=True)
+        raise typer.Exit(1)

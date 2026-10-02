@@ -70,6 +70,14 @@ def save_session(db: str | Path, password: str | None, keyfile: str | Path | Non
     SESSION_FILE.write_bytes(_dpapi(json.dumps(payload).encode(), protect=True))
 
 
+def current_vault() -> Path | None:
+    """The vault the valid session was unlocked for (paths are not secret), else None."""
+    data = _read()
+    if data is None or data.get("expires", 0) < time.time() or not data.get("db"):
+        return None
+    return Path(data["db"])
+
+
 def seconds_left() -> int:
     data = _read()
     if data is None:

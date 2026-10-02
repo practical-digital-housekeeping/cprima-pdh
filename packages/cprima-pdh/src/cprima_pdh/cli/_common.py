@@ -4,17 +4,14 @@ from __future__ import annotations
 import sys
 from dataclasses import dataclass
 from enum import Enum
-from importlib.resources import files
 from pathlib import Path
 from typing import Annotated, NoReturn
 
 import typer
 from pydantic import BaseModel
 
-from .. import backends, schema, source
+from .. import backends, profiles, schema, source
 from ..render import Format, get_renderer
-
-DEFAULT_TAXONOMY = files("cprima_pdh") / "data" / "schemas.toml"
 
 Fmt = Annotated[Format, typer.Option("--format", "-f", help="Output format.")]
 Apply = Annotated[bool, typer.Option("--apply", help="Write. Without it: dry run.")]
@@ -31,6 +28,9 @@ class AppState:
     db: Path | None = None
     key: Path | None = None
     schemas: Path | None = None
+    profile: str = profiles.DEFAULT
+    profile_origin: str = ""  # where the profile came from; empty = the built-in default
+    vault_source: str = "none"  # where the vault came from (--db, KDBX_FILE, config, session)
 
 
 def state(ctx: typer.Context) -> AppState:
@@ -65,7 +65,7 @@ def prompt_password() -> str | None:
 
 def require_db(st: AppState) -> Path:
     if st.db is None:
-        fail("no vault: pass --db before the command or set KDBX_FILE")
+        fail("no vault: pass --db or --vault before the command, set KDBX_FILE, or configure one (pdh.toml)")
     return st.db
 
 
@@ -85,11 +85,29 @@ def open_db(db: Path, key: Path | None):
         fail(f"open failed: {exc}", 1)
 
 
+def taxonomy_source(st: AppState) -> str:
+    return str(st.schemas) if st.schemas is not None else f"profile {st.profile!r}"
+
+
+def taxonomy_origin(st: AppState) -> str:
+    """Where the profile was chosen, for `doctor`: '--schemas', 'from --profile', 'from config ...' or ''."""
+    if st.schemas is not None:
+        return "--schemas"
+    return f"from {st.profile_origin}" if st.profile_origin else ""
+
+
+def read_taxonomy(st: AppState):
+    """Load the taxonomy: the --schemas file if given, else the selected packaged profile.
+
+    Raises SchemaError (callers decide how to report it)."""
+    if st.schemas is not None:
+        return schema.load_schemas(st.schemas)
+    return profiles.load(st.profile)
+
+
 def load_taxonomy(st: AppState):
     try:
-        if st.schemas is not None:
-            return schema.load_schemas(st.schemas)
-        return schema.parse_schemas(DEFAULT_TAXONOMY.read_text(encoding="utf-8"), "packaged taxonomy")
+        return read_taxonomy(st)
     except schema.SchemaError as exc:
         fail(f"schema error: {exc}")
 

@@ -1,12 +1,26 @@
-"""Output adapters. Every renderer writes to a TextIO (stdout by default)."""
+"""Output adapters: the only place that turns a result model into text, JSON or Markdown.
+
+Every command returns a model and hands it to `get_renderer(...).render(model, stdout)`; no command prints results
+itself. JSON is the model as it is; text and Markdown come from `to_text`, a registry keyed on the model type: a model
+without an entry gets the generic key/value layout, so a new command works at once and can be given a nicer layout later.
+"""
 from __future__ import annotations
 
 from enum import Enum
+from functools import singledispatch
 from typing import Iterator, Protocol, TextIO
 
 from pydantic import BaseModel
 
-from .models import EntryList, GroupNode, TaxonomyDoc
+from .models import (
+    BackendList,
+    DoctorReport,
+    EntryList,
+    GroupNode,
+    ProfileList,
+    SessionState,
+    TaxonomyDoc,
+)
 
 
 class Format(str, Enum):
@@ -18,6 +32,8 @@ class Format(str, Enum):
 class Renderer(Protocol):
     def render(self, data: BaseModel, out: TextIO) -> None: ...
 
+
+# --- the generic layout ----------------------------------------------------------------------------
 
 def _items(obj) -> list[tuple[str, object]]:
     if isinstance(obj, BaseModel):
@@ -41,6 +57,91 @@ def _lines(obj, depth: int = 0, bullet: str = "") -> Iterator[str]:
             yield f"{pad}{bullet}{key}: {val}"
 
 
+# --- text layouts, one per model that wants its own ----------------------------------------------------
+
+@singledispatch
+def to_text(data: BaseModel, ascii_only: bool = False) -> str | None:
+    """The text layout of a model, or None for the generic key/value layout."""
+    return None
+
+
+@to_text.register
+def _(data: TaxonomyDoc, ascii_only: bool = False) -> str:  # already Markdown, readable as text too
+    return data.markdown
+
+
+@to_text.register
+def _(data: EntryList, ascii_only: bool = False) -> str:
+    return "".join(
+        f"{r.group}/{r.title}  [{r.username}]  {r.url}{'  #' + ','.join(r.tags) if r.tags else ''}\n" for r in data.entries)
+
+
+@to_text.register
+def _(data: DoctorReport, ascii_only: bool = False) -> str:
+    out, section = [], None
+    for c in data.checks:
+        if c.section != section:
+            section = c.section
+            out.append(f"{section}\n")
+        out.append(f"  {str(c).replace(chr(10), chr(10) + '  ')}\n")
+    return "".join(out)
+
+
+@to_text.register
+def _(data: BackendList, ascii_only: bool = False) -> str:
+    return "".join(f"{b.name:10} {b.detail}\n" for b in data.backends)
+
+
+@to_text.register
+def _(data: ProfileList, ascii_only: bool = False) -> str:
+    return "".join(f"{p.name:16} {p.version:8} {p.description}\n" for p in data.profiles)
+
+
+@to_text.register
+def _(data: SessionState, ascii_only: bool = False) -> str:
+    if data.action == "unlocked":
+        return f"unlocked for {data.minutes} min\n"
+    if data.action == "locked":
+        return "locked\n"
+    if data.action == "no-session":
+        return "no session\n"
+    if not data.unlocked:
+        return "locked\n"
+    return f"unlocked, {data.seconds_left // 60}m{data.seconds_left % 60:02d}s left\n"
+
+
+def _group_line(node: GroupNode) -> str:
+    if node.kind == "recycle-bin":
+        return f"{node.name}/  ({node.total}, not counted)"
+    counts = f"{node.total}, {node.typed} typed" if node.typed else f"{node.total}"
+    return f"{node.name}/  ({counts})" + (f"  <- {node.note}" if node.note else "") + (" ..." if node.collapsed else "")
+
+
+@to_text.register
+def _(data: GroupNode, ascii_only: bool = False) -> str:
+    mid, last, bar, gap = ("|-- ", "`-- ", "|   ", "    ") if ascii_only else ("├── ", "└── ", "│   ", "    ")
+    lines = [_group_line(data)]
+
+    def walk(node: GroupNode, prefix: str) -> None:
+        kids: list[tuple[str, object]] = [("g", c) for c in node.children] + [("e", t) for t in node.entries]
+        for i, (kind, item) in enumerate(kids):
+            is_last = i == len(kids) - 1
+            branch = last if is_last else mid
+            if kind == "g":
+                lines.append(f"{prefix}{branch}{_group_line(item)}")
+                walk(item, prefix + (gap if is_last else bar))
+            else:
+                written = ", ".join(item.schemas)
+                derived = f"by fields: {', '.join(item.by_fields)}" if item.by_fields else ""
+                tag = f"  [{'; '.join(p for p in (written, derived) if p) or '?'}]"
+                lines.append(f"{prefix}{branch}{item.title}{tag}")
+
+    walk(data, "")
+    return "\n".join(lines) + "\n"
+
+
+# --- the renderers ---------------------------------------------------------------------------------------
+
 class JsonRenderer:
     def render(self, data: BaseModel, out: TextIO) -> None:
         out.write(data.model_dump_json(indent=2) + "\n")
@@ -48,42 +149,25 @@ class JsonRenderer:
 
 class TextRenderer:
     def __init__(self, ascii_only: bool = False) -> None:
-        self.mid, self.last, self.bar, self.gap = (
-            ("|-- ", "`-- ", "|   ", "    ") if ascii_only else ("├── ", "└── ", "│   ", "    ")
-        )
+        self.ascii_only = ascii_only
 
     def render(self, data: BaseModel, out: TextIO) -> None:
-        if isinstance(data, TaxonomyDoc):  # already Markdown, readable as text too
-            out.write(data.markdown)
-        elif isinstance(data, GroupNode):
-            out.write(f"{data.name}/  ({data.entry_count})\n")
-            self._tree(data, "", out)
-        elif isinstance(data, EntryList):
-            for r in data.entries:
-                extra = f"  #{','.join(r.tags)}" if r.tags else ""
-                out.write(f"{r.group}/{r.title}  [{r.username}]  {r.url}{extra}\n")
-        else:
-            for line in _lines(data):
-                out.write(line + "\n")
-
-    def _tree(self, node: GroupNode, prefix: str, out: TextIO) -> None:
-        kids = [("g", c) for c in node.children] + [("e", t) for t in node.entries]
-        for i, (kind, item) in enumerate(kids):
-            last = i == len(kids) - 1
-            branch = self.last if last else self.mid
-            if kind == "g":
-                out.write(f"{prefix}{branch}{item.name}/  ({item.entry_count})\n")
-                self._tree(item, prefix + (self.gap if last else self.bar), out)
-            else:
-                out.write(f"{prefix}{branch}{item}\n")
+        text = to_text(data, self.ascii_only)
+        if text is not None:
+            out.write(text)
+            return
+        for line in _lines(data):
+            out.write(line + "\n")
 
 
 class MarkdownRenderer(TextRenderer):
+    FENCED = (GroupNode, EntryList)  # layouts that need a monospace block to survive Markdown
+
     def render(self, data: BaseModel, out: TextIO) -> None:
         if isinstance(data, TaxonomyDoc):
             out.write(data.markdown)
             return
-        if isinstance(data, (GroupNode, EntryList)):
+        if isinstance(data, self.FENCED):
             out.write("```\n")
             super().render(data, out)
             out.write("```\n")

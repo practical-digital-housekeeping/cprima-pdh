@@ -3,8 +3,9 @@ from __future__ import annotations
 
 import typer
 
-from .. import schema
+from .. import profiles, schema
 from .. import taxonomy as taxonomy_mod
+from ..models import ProfileList
 from ..render import Format
 from . import _common as c
 
@@ -15,6 +16,12 @@ app = typer.Typer(no_args_is_help=True, help="The method: taxonomy, record types
 def show(ctx: typer.Context, fmt: c.Fmt = Format.markdown) -> None:
     """The taxonomy document (principles, areas, record types, field kinds, vocabulary, decisions)."""
     c.emit(taxonomy_mod.build(c.load_taxonomy(c.state(ctx))), fmt)
+
+
+@app.command("profiles")
+def list_profiles(fmt: c.Fmt = Format.text) -> None:
+    """The packaged taxonomy profiles: complete, named taxonomies; a vault follows exactly one (--profile)."""
+    c.emit(ProfileList(profiles=profiles.infos()), fmt)
 
 
 @app.command()

@@ -8,6 +8,7 @@ import typer
 
 from .. import infer as infer_mod
 from .. import schema, source
+from .. import tree as tree_mod
 from ..models import EntryList, TagCounts
 from ..render import Format
 from . import _common as c
@@ -30,11 +31,14 @@ def inventory(ctx: typer.Context, fmt: c.Fmt = Format.text) -> None:
 def tree(
     ctx: typer.Context,
     fmt: c.Fmt = Format.text,
-    entries: Annotated[bool, typer.Option("--entries", help="Also list entry titles.")] = False,
+    entries: Annotated[bool, typer.Option("--entries", help="Also list entries with their record types.")] = False,
     ascii_only: Annotated[bool, typer.Option("--ascii", help="ASCII tree characters.")] = False,
+    depth: Annotated[Optional[int], typer.Option("--depth", min=1, help="Levels below the root to show.")] = None,
 ) -> None:
-    """Group hierarchy with entry counts."""
-    c.emit(source.tree(_kp(ctx), entries), fmt, ascii_only)
+    """The groups seen through the method: owner (level 1), area (level 2), total entries and how many are typed,
+    and what the method would not expect (an entry outside an owner, a group that is not an area). The recycle bin
+    is shown last and not counted."""
+    c.emit(tree_mod.build(_kp(ctx), c.load_taxonomy(c.state(ctx)), entries, depth), fmt, ascii_only)
 
 
 @app.command("entries")

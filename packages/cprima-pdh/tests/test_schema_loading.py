@@ -43,6 +43,30 @@ def test_the_public_taxonomy_loads():
     assert "key_material" in sset.fields
 
 
+def test_a_profile_header_names_the_taxonomy_the_profile_and_the_version():
+    sset = parse_schemas('[profile]\ntaxonomy = "pdh"\nname = "default"\nversion = "0.1"\ndescription = "x"\n')
+    p = sset.profile
+    assert (p.taxonomy, p.name, p.version, p.description) == ("pdh", "default", "0.1", "x")
+    assert p.full_name == "pdh-default"  # the one name a profile is selected, configured and filed by
+
+
+def test_the_profile_header_is_optional():
+    assert parse_schemas("[schema.a]\nrequired = ['Title']\n").profile is None
+
+
+@pytest.mark.parametrize("text", [
+    '[profile]\nname = "x"\nversion = "1"\n',                        # the taxonomy is required
+    '[profile]\ntaxonomy = "t"\nversion = "1"\n',                    # a name is required
+    '[profile]\ntaxonomy = "t"\nname = "a b"\nversion = "1"\n',      # plain labels: lowercase letters, digits, hyphen
+    '[profile]\ntaxonomy = "T"\nname = "x"\nversion = "1"\n',
+    '[profile]\ntaxonomy = "t"\nname = "x"\n',                       # a version is required
+    '[profile]\ntaxonomy = "t"\nname = "x"\nversion = "1"\ncolour = "red"\n',
+])
+def test_a_bad_profile_header_is_rejected(text):
+    with pytest.raises(SchemaError):
+        parse_schemas(text)
+
+
 def test_missing_file_is_a_schema_error(tmp_path):
     with pytest.raises(SchemaError):
         load_schemas(tmp_path / "nope.toml")
