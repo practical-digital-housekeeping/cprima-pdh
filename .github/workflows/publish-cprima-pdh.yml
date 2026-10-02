@@ -32,7 +32,9 @@ jobs:
           test "$want" = "$have" || { echo "tag $want != pyproject $have"; exit 1; }
 
       - name: Run tests
-        run: uv run --extra kdbx --with pytest pytest -q
+        # from the repo root: the tests use the workspace package pdh-testkit
+        working-directory: .
+        run: uv run --all-packages --all-extras pytest -q
 
       - name: Build sdist and wheel
         # --out-dir: inside a workspace, `uv build` would write to the workspace root dist/

@@ -26,11 +26,28 @@ focus, 1Password and Bitwarden item and field types (see the sources in `TAXONOM
 
 ## 2. Next  (NEXT)
 
-1. **Schema-to-vocabulary integrity.** With the taxonomy as dogma, a schema should only name fields that are
-   vocabulary terms (or standard fields). Today `cardholder`, `issuer`, `issuer_phone`, `carrier`, `phone_number`,
-   `tel` are not terms. Promote them or drop them.
-2. **Simplify the engine.** Remove schema-local `aliases` and the `types` mapping (field names are terms).
-3. **`new-entry` has no tests** yet; the write paths in general need tests on real (synthetic) vault files.
+1. **Simplify the engine.** The default profile uses no schema-local `aliases` or `types` (a test enforces it); remove
+   the engine support for them. Schema-to-vocabulary integrity is done: every field a record type names is a term.
+2. **`new-entry` has no tests** yet; the write paths in general need tests on real (synthetic) vault files.
+3. **Profiles beyond `pdh-default`.** The structure is ready: a profile is named by its taxonomy and its own name
+   (`pdh` + `default` = `pdh-default`, file `profiles/pdh-default.toml`), selected with `--profile`, `PDH_PROFILE` or the
+   `profile` key in the config. A second profile needs a reason and an owner. Open: recording the profile and version
+   in the vault so `doctor` can say which one a vault follows.
+
+---
+
+## 2b. The profile drives everything  (NEXT, in progress)
+
+The profile is the single source of truth; the engine only interprets it, and the `kdbx` backend (extra
+`cprima-pdh[kdbx]`) owns how it is stored in KeePass. Moved into the profile or the backend so far (2026-10-03):
+finding levels (`[level]`), standard fields (`[standard.*]`) and their KeePass storage (`backends/kdbx.py`:
+attribute mapping, protected standard fields, OTP plugin prefixes, how each field kind is stored), the list of field
+kinds (`[kind.*]`; `behaviour = "link"` marks the kind that holds an entry reference), the default area per record type
+(`area =` on `[schema.*]`) and example values (`example =` on kinds, terms and standard fields, checked against the
+term's pattern) and what `conform` advises per finding (`[advice.*]`). A test checks that none of it is defined twice. Still duplicated in code, to move next:
+1. the binding field name `_schema` (many string literals) -> `[binding]`;
+2. generated reference pages per record type with a worked example, and a second, tiny profile that proves nothing
+   else is coupled to the default one.
 
 ---
 
@@ -68,7 +85,12 @@ focus, 1Password and Bitwarden item and field types (see the sources in `TAXONOM
 - Continuity overview: critical records per area and owner, where the secret lives, **no secret values**.
 - 2FA coverage and password reuse by area (counts only).
 - `pdh init`: starter taxonomy for a fresh vault.
-- `classify`: dry run that only *proposes* `_schema` values from structure, never a runtime binding.
+- `classify` (parked, low priority): `pdh inspect classify`, read-only; proposes `_schema` values from structure, never a
+  runtime binding. Design worked out: an entry fits a record type when it has every required field and at least one
+  field the type names; a closed type refuses fields it does not allow; best fit = most recognised fields, then the
+  smaller type; further types only for fields the first does not explain; unclear entries say why (missing required
+  field, closed type, nothing but a title). Ground truth for tests: strip `_schema` from the canonical vault and
+  expect the types back (`onlineshop, website` is recognised as `onlineshop`, which already contains the login).
 - Label-space lint with a mechanical rename suggestion.
 - A read-only MCP server exposing the checks to agents, as an extra of the same package.  (IDEA, later)
 
@@ -89,14 +111,12 @@ Protocol the skill must encode:
 
 ## 6. Open questions  (OPEN)
 
-1. Label style beyond abbreviations: separator and case of ordinary multi-word terms (`customer_no` vs `CustomerNo`),
-   and compounds containing an abbreviation (`SO_PIN`, `API_key`, `User_PIN`).
-2. Field names with spaces: rename mechanically (`_`) or by hand?
-3. Final list of kinds and families (first proposal in `TAXONOMY.md`).
-4. Does `pattern` stay at all (currently INFO)?
-5. Case-insensitive matching scope.
-6. Is "expires within N days" a reminder (structure) or a value check?
-7. Rules as Python predicates or XPath (today: XPath)?
+1. Field names with spaces in a vault: rename mechanically (`_`) or by hand? (The label style itself is decided:
+   snake_case, capitals only for a term that is an abbreviation; `pattern` stays at INFO.)
+2. Final list of kinds and families (first proposal in `profiles/pdh-default.md`).
+3. Case-insensitive matching scope.
+4. Is "expires within N days" a reminder (structure) or a value check?
+5. Rules as Python predicates or XPath (today: XPath)?
 
 ---
 
@@ -110,7 +130,9 @@ Protocol the skill must encode:
 | Checksum validators (Luhn, IBAN) and lookups | REJECTED | the owner alone is responsible for data quality |
 | `linkify()` / `tel:` links | REJECTED | out of scope |
 | Tags as schema binding | REJECTED | explicit `_schema` field instead |
-| Implicit matching rules, group globs | REJECTED | explicit `_schema` only; rules at most as seeding aid |
+| Group globs (typing by folder) | REJECTED | folders are for browsing; typing is by `_schema` and/or fields |
+| ~~Implicit matching rules~~ | **now implemented** | `[[match]]` rules bind a type from fields that belong to one type alone; `_schema` and/or rules, union (2026-10-03) |
+| A `CVV` match rule (credit-card) | REJECTED | `bank-card` is `closed` so a CVV on it is reported; a rule would turn it into a second type |
 | `landline` as a term | REJECTED | `phone` and `mobile` are the two terms |
 | "sub-schema" name | REJECTED | called facet |
 | `http://` presented as a problem | REJECTED | `http://` is a valid URI; WARN at most |

@@ -8,4 +8,5 @@ __pycache__/
 .env
 *.kdbx
 !tests/**/*.kdbx
-!examples/*.kdbx
+!examples/**/*.kdbx
+!packages/pdh-testkit/vaults/*.kdbx
