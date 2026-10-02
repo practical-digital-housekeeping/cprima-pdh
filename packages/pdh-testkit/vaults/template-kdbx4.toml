@@ -1,0 +1,6 @@
+# Sidecar of template-kdbx4.kdbx: a genuine, empty vault made by hand in a real client.
+# Throwaway test password; never use it for anything real.
+password = "test123"
+client = "KeePassXC"
+format = "KDBX 4.0"
+description = "Empty template (Root group only). Copy it, fill it by hand in the client, give the copy its own sidecar."

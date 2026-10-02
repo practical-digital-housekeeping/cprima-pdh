@@ -1,0 +1,7 @@
+# Sidecar of sample.kdbx: the showcase vault. pdh reads the password from here, so it needs no prompt.
+# A throwaway sample password; never use it for anything real.
+password = "sample-test"
+client = "KeePassXC"
+format = "KDBX 4.0"
+filled_by = "pdh-testkit showcase builder (pykeepass), on a copy of template-kdbx4.kdbx"
+description = "Fictional vault organised by the profile pdh-default: three owners, every area, every record type, all conforming. Regenerate with `just example`."

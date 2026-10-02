@@ -11,6 +11,13 @@ from dataclasses import dataclass, field
 
 from lxml import etree
 
+def _binding_field() -> str:
+    """The custom field that names an entry's record types: the default profile's (what small taxonomies inherit)."""
+    from cprima_pdh import profiles
+
+    return profiles.load(profiles.DEFAULT).binding.field
+
+
 RESERVED = {"Title", "UserName", "Password", "URL", "Notes", "otp"}
 
 
@@ -124,7 +131,7 @@ def E(
         _string(el, "otp", totp, protected=True)
     fields = dict(custom or {})
     if schema is not None:
-        fields["_schema"] = schema
+        fields[_binding_field()] = schema
     for k, v in fields.items():
         _string(el, k, v, protected=k in protected)
     return StubEntry(el, group if isinstance(group, StubGroup) else StubGroup(group.split("/")))

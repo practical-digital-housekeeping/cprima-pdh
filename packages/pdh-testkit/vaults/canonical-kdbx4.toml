@@ -1,0 +1,7 @@
+# Sidecar of canonical-kdbx4.kdbx: the genuine template, filled by pdh-testkit. NOT a client-made vault.
+# Throwaway test password; never use it for anything real.
+password = "canonical-test"
+client = "KeePassXC"
+format = "KDBX 4.0"
+filled_by = "pdh-testkit canonical builder (pykeepass), on a copy of template-kdbx4.kdbx"
+description = "One owner group, every area of the default profile, one canonical entry per record type. Every entry conforms. Unit and integration tests only; regenerate with `just canonical`."

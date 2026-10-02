@@ -1,0 +1,14 @@
+# pdh configuration for this folder (dev testing): the vault fixtures. Their passwords are in the sidecar .toml files.
+default = "canonical-kdbx4"
+
+[vaults.canonical-kdbx4]
+path = "packages/pdh-testkit/vaults/canonical-kdbx4.kdbx"
+
+[vaults.sample]
+path = "examples/pdh-default/sample.kdbx"
+
+[vaults.template-kdbx4]
+path = "packages/pdh-testkit/vaults/template-kdbx4.kdbx"
+
+[vaults.template-kdbx3]
+path = "packages/pdh-testkit/vaults/template-kdbx3.kdbx"

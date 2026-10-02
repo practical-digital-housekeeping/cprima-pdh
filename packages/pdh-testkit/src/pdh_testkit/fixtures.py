@@ -18,6 +18,16 @@ def pytest_configure(config: pytest.Config) -> None:
         os.environ["PDH_SESSION_FILE"] = str(Path(tempfile.gettempdir()) / f"pdh-test-session-{os.getpid()}.bin")
 
 
+@pytest.fixture(autouse=True)
+def _isolated_pdh_environment(monkeypatch, tmp_path_factory):
+    """No test sees the owner's config files, vault variables or current folder."""
+    home = tmp_path_factory.mktemp("pdh-env")
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(home / "xdg"))
+    for name in ("PDH_CONFIG", "PDH_VAULT", "PDH_SCHEMAS", "KDBX_FILE", "KDBX_KEY"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.chdir(home)
+
+
 @pytest.fixture
 def make_synthetic_vault(tmp_path: Path) -> Callable[..., Path]:
     """Factory: `make_synthetic_vault(entries, name="vault.kdbx", **kw)` -> path of a fast synthetic vault."""

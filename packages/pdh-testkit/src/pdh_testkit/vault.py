@@ -48,6 +48,7 @@ def _lower_kdf(kp: PyKeePass) -> None:
 def synthetic_vault(path: Path, entries: list[Entry] | tuple[Entry, ...] = (), password: str = DEFAULT_PASSWORD,
                     groups: list[str] | tuple[str, ...] = ()) -> Path:
     """Write a KDBX 4 vault with `entries` (and extra empty `groups`) to `path`; returns `path`."""
+    path.parent.mkdir(parents=True, exist_ok=True)
     kp = create_database(str(path), password=password)
     _lower_kdf(kp)
     for g in groups:
