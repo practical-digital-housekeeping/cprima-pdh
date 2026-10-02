@@ -1,6 +1,13 @@
-# Workspace root of the cprima-pdh monorepo (not published). The published package is packages/cprima-pdh.
+# Workspace root of the cprima-pdh monorepo (not published). The published package is packages/cprima-pdh;
+# packages/pdh-testkit is test support only and is never published.
 [tool.uv.workspace]
 members = ["packages/*"]
 
+[dependency-groups]
+dev = ["pytest>=8", "pdh-testkit"]
+
+[tool.uv.sources]
+pdh-testkit = { workspace = true }
+
 [tool.pytest.ini_options]
-testpaths = ["packages/cprima-pdh/tests"]
+testpaths = ["packages/cprima-pdh/tests", "packages/pdh-testkit/tests"]
