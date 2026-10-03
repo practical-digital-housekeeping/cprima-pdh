@@ -18,6 +18,8 @@ default = "WARN"
 required = "ERROR"
 pattern = "INFO"
 "schema:unknown" = "ERROR"
+"known-password" = "ERROR"
+"breach:unchanged" = "ERROR"
 
 [standard.Title]
 kind = "text"
@@ -57,6 +59,14 @@ note = "ask the owner for the value; never invent one"
 action = "fix-schema"
 command = "pdh edit set {entry} {binding} <type> --overwrite --apply"
 note = "name a record type from `pdh method schemas`, or drop the field"
+
+[advice.known-password]
+action = "change-password"
+note = "this password appears in known leaks"
+
+[advice."breach:unchanged"]
+action = "change-password"
+note = "the site was breached and this entry was not changed since"
 
 [advice.pattern]
 action = "review-value"

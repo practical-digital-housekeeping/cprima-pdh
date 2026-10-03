@@ -47,6 +47,8 @@ Findings carry a level, like log levels. An exact rule id wins over its kind (th
 | `required` | ERROR |
 | `pattern` | INFO |
 | `schema:unknown` | ERROR |
+| `known-password` | ERROR |
+| `breach:unchanged` | ERROR |
 
 ## Advice
 
@@ -57,6 +59,8 @@ What `pdh check conform` suggests per finding; the most specific key wins. `auto
 | `default` | review | no | — | the finding's message |
 | `required` | supply-value | no | `pdh edit set {entry} {term} <value> --apply` | ask the owner for the value; never invent one |
 | `schema:unknown` | fix-schema | no | `pdh edit set {entry} {binding} <type> --overwrite --apply` | name a record type from `pdh method schemas`, or drop the field |
+| `known-password` | change-password | no | — | this password appears in known leaks |
+| `breach:unchanged` | change-password | no | — | the site was breached and this entry was not changed since |
 | `pattern` | review-value | no | — | format hint only |
 
 ## Standard fields

@@ -176,6 +176,11 @@ Findings carry a level, like log levels. An exact rule id wins over its kind (th
 | `link:dangling` | ERROR |
 | `link:self` | ERROR |
 | `link:target-unclassified` | INFO |
+| `known-password` | ERROR |
+| `breach:unchanged` | ERROR |
+| `breach:changed` | INFO |
+| `breach:other` | INFO |
+| `breach:account` | WARN |
 
 ## Advice
 
@@ -197,6 +202,11 @@ What `pdh check conform` suggests per finding; the most specific key wins. `auto
 | `expires` | set-expiry | no | — | set the expiry date in the client; pdh does not write it |
 | `schema:unknown` | fix-schema | no | `pdh edit set {entry} {binding} <schema> --overwrite --apply` | name a schema from `pdh method schemas`, or drop the field |
 | `link` | fix-link | no | `pdh edit link {entry} <target> --overwrite --apply` | point the link field at an entry with an allowed schema |
+| `known-password` | change-password | no | `pdh edit set {entry} Password - --overwrite --apply` | this password appears in known leaks: change it at the service, then store the new one (the value is prompted, never passed on the command line) |
+| `breach:unchanged` | change-password | no | `pdh edit set {entry} Password - --overwrite --apply` | the site was breached and passwords were leaked; this entry has not been changed since: change the password at the service |
+| `breach:changed` | review-breach | no | — | the site was breached, but this entry was changed afterwards |
+| `breach:other` | review-breach | no | — | the site was breached; no passwords were leaked, but check what was (data classes in the report) |
+| `breach:account` | review-breach | no | — | the e-mail address of this entry appears in known breaches (names in the report): check those services |
 | `pattern` | review-value | no | — | format hint only; the owner is responsible for the value |
 
 ## Standard fields

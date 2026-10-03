@@ -62,6 +62,11 @@ pattern = "INFO"
 "link:dangling" = "ERROR"
 "link:self" = "ERROR"
 "link:target-unclassified" = "INFO"
+"known-password" = "ERROR"
+"breach:unchanged" = "ERROR"
+"breach:changed" = "INFO"
+"breach:other" = "INFO"
+"breach:account" = "WARN"
 
 # Standard fields: what every entry has, and of what kind. The names are the profile's; how a store keeps them
 # (a KeePass attribute, a Bitwarden field, ...) is the backend's business.
@@ -163,6 +168,28 @@ note = "name a schema from `pdh method schemas`, or drop the field"
 action = "fix-link"
 command = "pdh edit link {entry} <target> --overwrite --apply"
 note = "point the link field at an entry with an allowed schema"
+
+[advice.known-password]
+action = "change-password"
+command = "pdh edit set {entry} Password - --overwrite --apply"
+note = "this password appears in known leaks: change it at the service, then store the new one (the value is prompted, never passed on the command line)"
+
+[advice."breach:unchanged"]
+action = "change-password"
+command = "pdh edit set {entry} Password - --overwrite --apply"
+note = "the site was breached and passwords were leaked; this entry has not been changed since: change the password at the service"
+
+[advice."breach:changed"]
+action = "review-breach"
+note = "the site was breached, but this entry was changed afterwards"
+
+[advice."breach:other"]
+action = "review-breach"
+note = "the site was breached; no passwords were leaked, but check what was (data classes in the report)"
+
+[advice."breach:account"]
+action = "review-breach"
+note = "the e-mail address of this entry appears in known breaches (names in the report): check those services"
 
 [advice.pattern]
 action = "review-value"
