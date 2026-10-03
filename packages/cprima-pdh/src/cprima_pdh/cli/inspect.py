@@ -2,10 +2,13 @@
 from __future__ import annotations
 
 from collections import Counter
+from datetime import datetime, timedelta, timezone
 from typing import Annotated, Optional
 
 import typer
 
+from .. import attachments as attachments_mod
+from .. import history as history_mod
 from .. import infer as infer_mod
 from .. import schema, source
 from .. import tree as tree_mod
@@ -14,6 +17,15 @@ from ..render import Format
 from . import _common as c
 
 app = typer.Typer(no_args_is_help=True, help="Read-only views of a vault.")
+
+
+def _guarded(action):
+    from ..write import WriteError
+
+    try:
+        return action()
+    except WriteError as exc:
+        c.fail(f"not found: {exc}", 1)
 
 
 def _kp(ctx: typer.Context):
@@ -42,9 +54,25 @@ def tree(
 
 
 @app.command("entries")
-def list_entries(ctx: typer.Context, fmt: c.Fmt = Format.text) -> None:
-    """List all entries."""
-    c.emit(EntryList(entries=source.records(_kp(ctx))), fmt)
+def list_entries(
+    ctx: typer.Context,
+    fmt: c.Fmt = Format.text,
+    expired: Annotated[bool, typer.Option("--expired", help="Entries past their expiry date.")] = False,
+    expiring: Annotated[Optional[int], typer.Option("--expiring", min=0, help="Entries expiring within this many days.")] = None,
+) -> None:
+    """List all entries, or only those that have expired and/or expire soon."""
+    records = source.records(_kp(ctx))
+    if expired or expiring is not None:
+        now = datetime.now(timezone.utc)
+        horizon = now + timedelta(days=expiring) if expiring is not None else None
+
+        def wanted(r) -> bool:
+            if r.expires is None:
+                return False
+            return (expired and r.expires < now) or (horizon is not None and now <= r.expires <= horizon)
+
+        records = [r for r in records if wanted(r)]
+    c.emit(EntryList(entries=records), fmt)
 
 
 @app.command()
@@ -62,14 +90,58 @@ def totp(ctx: typer.Context, fmt: c.Fmt = Format.text) -> None:
 
 
 @app.command()
-def find(ctx: typer.Context, text: str, fmt: c.Fmt = Format.text) -> None:
-    """Entries whose title, username, URL or notes contain TEXT."""
+def find(
+    ctx: typer.Context, text: str, fmt: c.Fmt = Format.text,
+    in_fields: Annotated[bool, typer.Option("--in-fields", help="Search custom field names and values instead "
+                                            "(protected ones too; values are never printed).")] = False,
+) -> None:
+    """Entries whose title, username, URL or notes contain TEXT (or, with --in-fields, a custom field does)."""
     needle = text.lower()
 
     def match(e) -> bool:
+        if in_fields:
+            return any(needle in k.lower() or needle in (v or "").lower() for k, v in (e.custom_properties or {}).items())
         return any(needle in (v or "").lower() for v in (e.title, e.username, e.url, e.notes))
 
     c.emit(EntryList(entries=source.records(_kp(ctx), match)), fmt)
+
+
+@app.command("history")
+def history(ctx: typer.Context, path: Annotated[str, typer.Argument(help="Entry as `group/path/title`.")],
+            fmt: c.Fmt = Format.text,
+            username: Annotated[Optional[str], typer.Option("--username", help="Pick among entries sharing the path.")] = None) -> None:
+    """The history of an entry: when it changed and which fields, never the values."""
+    c.emit(_guarded(lambda: history_mod.history_report(_kp(ctx), path, username)), fmt)
+
+
+@app.command("otp")
+def otp_code(ctx: typer.Context, path: Annotated[str, typer.Argument(help="Entry as `group/path/title`.")],
+             fmt: c.Fmt = Format.text,
+             username: Annotated[Optional[str], typer.Option("--username", help="Pick among entries sharing the path.")] = None) -> None:
+    """The current one-time password of an entry: the code and its remaining seconds, never the secret."""
+    from .. import otp as otp_mod
+    from ..write import WriteError, find_entry
+
+    e = _guarded(lambda: find_entry(_kp(ctx), path, username))
+    params = None
+    try:
+        if e.otp:
+            params = otp_mod.parse(e.otp)
+        else:
+            params = otp_mod.from_plugin_fields(dict(e.custom_properties or {}))
+    except ValueError as exc:
+        c.fail(f"{path}: {exc}", 1)
+    if params is None:
+        c.fail(f"{path} has no one-time password", 1)
+    c.emit(otp_mod.code(params), fmt)
+
+
+@app.command("attachments")
+def attachments(ctx: typer.Context, path: Annotated[str, typer.Argument(help="Entry as `group/path/title`.")],
+                fmt: c.Fmt = Format.text,
+                username: Annotated[Optional[str], typer.Option("--username", help="Pick among entries sharing the path.")] = None) -> None:
+    """The attachments of an entry: name and size, never the content."""
+    c.emit(_guarded(lambda: attachments_mod.attachments_report(_kp(ctx), path, username)), fmt)
 
 
 @app.command()

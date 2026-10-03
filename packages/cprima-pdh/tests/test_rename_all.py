@@ -131,3 +131,29 @@ def test_under_needs_all(vault):
 def test_refused_names_exit_with_a_message(vault):
     result = invoke(vault, "edit", "rename-field", "--all", "Password", "x")
     assert result.exit_code != 0 and "refused" in result.output
+
+
+def test_a_bulk_rename_leaves_one_history_snapshot_per_touched_entry_and_none_on_the_others(vault):
+    assert invoke(vault, "edit", "rename-field", "--all", "old", "new", "--apply").exit_code == 0
+    kp = PyKeePass(str(vault), password=DEFAULT_PASSWORD)
+    by = {e.title: e for e in kp.entries}
+    assert [len(by[t].history) for t in ("a", "b", "c")] == [1, 1, 1] and len(by["d"].history) == 0
+    assert by["a"].history[0].get_custom_property("old") == "1"  # undo is possible: the old name is in the snapshot
+
+
+def test_vocabulary_snapshots_the_entries_it_changes(tmp_path):
+    vocab = synthetic_vault(tmp_path / "x.kdbx", [Entry("a", group="G", custom={"serialnumber": "1"}),
+                                                   Entry("b", group="G", custom={"fine": "2"})])
+    result = CliRunner().invoke(app, ["--db", str(vocab), "--schemas", str(_aliases(tmp_path)), "edit", "vocabulary", "--apply"])
+    assert result.exit_code == 0, result.output
+    kp = PyKeePass(str(vocab), password=DEFAULT_PASSWORD)
+    by = {e.title: e for e in kp.entries}
+    assert by["a"].get_custom_property("serial_number") == "1" and len(by["a"].history) == 1 and len(by["b"].history) == 0
+
+
+def _aliases(tmp_path):
+    f = tmp_path / "t.toml"
+    f.write_text(
+        "\n".join(["[field.serial_number]", 'aliases = ["serialnumber"]', "[schema.s]", 'required = ["Title"]', ""]),
+        encoding="utf-8")
+    return f

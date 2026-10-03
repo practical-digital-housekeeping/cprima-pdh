@@ -220,9 +220,7 @@ def _live_entries(kp) -> tuple[list, object | None]:
 
 
 def _file_contents(r: _Report, kp) -> list:
-    from lxml import etree
-
-    from .source import _in_bin
+    from .source import _in_bin, attachment_bytes, history_totals
 
     live, rb = _live_entries(kp)
     bin_uuid = rb.uuid if rb is not None else None
@@ -239,11 +237,10 @@ def _file_contents(r: _Report, kp) -> list:
     else:
         r.add("file", "recycle bin", "ok", f"on, {sum(1 for e in kp.entries if _in_bin(e.group, bin_uuid))} entries")
 
-    versions = [h for e in live for h in (e.history or [])]
-    hist_bytes = sum(len(etree.tostring(h._element)) for h in versions)
+    hist = history_totals(live)
     binaries = list(getattr(kp, "binaries", None) or [])
-    r.add("file", "history", "ok", f"{len(versions)} older versions, {_size(hist_bytes)}")
-    r.add("file", "attachments", "ok", f"{len(binaries)} files, {_size(sum(len(b) for b in binaries))}")
+    r.add("file", "history", "ok", f"{hist.snapshots} older versions, {_size(hist.bytes)}")
+    r.add("file", "attachments", "ok", f"{len(binaries)} files, {_size(attachment_bytes(kp))}")
 
     now = datetime.now(timezone.utc)
     soon = now + timedelta(days=30)

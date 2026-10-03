@@ -1,7 +1,6 @@
 """Write operations. Everything here is dry-run unless `apply` is set."""
 from __future__ import annotations
 
-import hashlib
 import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable
@@ -9,7 +8,7 @@ from typing import TYPE_CHECKING, Callable
 from .backends.kdbx import STANDARD_ATTR, STANDARD_PROTECTED
 from .models import Change
 from .schema import make_ref, uuid_key
-from .source import _gpath, pykeepass_open
+from .source import _gpath
 
 if TYPE_CHECKING:
     from pykeepass import PyKeePass
@@ -36,12 +35,18 @@ def find_entry(kp: PyKeePass, path: str, username: str | None = None):
     return hits[0]
 
 
-def _is_protected(e, field: str, protect: bool) -> bool:
-    return (
-        protect
-        or field in STANDARD_PROTECTED
-        or bool(e._element.xpath("boolean(String[Key=$k]/Value[@Protected='True'])", k=field))
-    )
+def effective_protection(e, field: str, protect: bool, unprotect: bool = False) -> bool:
+    """Whether the field ends up protected: asked for, else asked against, else as it already is.
+
+    Setting a custom field replaces its XML element, so the flag has to be carried over explicitly; otherwise every
+    edit of a protected field would silently unprotect it."""
+    if field in STANDARD_ATTR:
+        return field in STANDARD_PROTECTED
+    if protect:
+        return True
+    if unprotect:
+        return False
+    return bool(e._element.xpath("boolean(String[Key=$k]/Value[@Protected='True'])", k=field))
 
 
 def _get(e, field: str) -> str:
@@ -65,12 +70,15 @@ def plan_set(
     overwrite: bool,
     protect: bool,
     username: str | None = None,
+    unprotect: bool = False,
 ) -> Change:
+    if protect and unprotect:
+        raise WriteError("--protect and --unprotect exclude each other")
     if callable(value):  # a value that needs the opened database, such as a link to another entry
         value = value(kp)
     e = find_entry(kp, path, username)
     old = _get(e, field)
-    hide = _is_protected(e, field, protect)
+    hide = effective_protection(e, field, protect, unprotect)
     shown = (lambda v: _HIDDEN if v and hide else v)
     if old == value:
         action = "unchanged"
@@ -79,16 +87,6 @@ def plan_set(
     else:
         action = "set"
     return Change(entry=path, field=field, old=shown(old), new=shown(value), action=action)
-
-
-def _snapshot(kp: PyKeePass) -> dict[str, str]:
-    """uuid -> digest of everything user-visible about the entry (compared in memory only)."""
-    out = {}
-    for e in kp.entries:
-        parts = [e.title, e.username, e.password, e.url, e.notes, e.otp, ",".join(sorted(e.tags or [])),
-                 repr(sorted((e.custom_properties or {}).items())), _gpath(e.group), str(e.expires)]
-        out[str(e.uuid)] = hashlib.sha256("\x1f".join(p or "" for p in parts).encode()).hexdigest()
-    return out
 
 
 def _fingerprint(db: Path) -> tuple[int, int]:
@@ -109,41 +107,36 @@ def apply_set(
     overwrite: bool,
     protect: bool,
     username: str | None = None,
+    unprotect: bool = False,
 ) -> Change:
-    before = _fingerprint(db)
-    kp = open_db()
-    if callable(value):
-        value = value(kp)
-    change = plan_set(kp, path, field, value, overwrite, protect, username)
-    if change.action != "set":
-        return change
+    """Set one field on one entry: history snapshot, one save, reopened and verified (see `txn.execute`)."""
+    from .txn import Plan, execute, snapshot
 
-    if locks := _lock_files(db):
-        raise WriteError(f"database seems open elsewhere (lock file {locks[0].name}); close it first")
+    def build(kp: PyKeePass) -> Plan:
+        wanted = value(kp) if callable(value) else value
+        change = plan_set(kp, path, field, wanted, overwrite, protect, username, unprotect)
+        if change.action != "set":
+            return Plan(change=change)
+        e = find_entry(kp, path, username)
+        uid = str(e.uuid)
+        keep = effective_protection(e, field, protect, unprotect)
 
-    e = find_entry(kp, path, username)
-    target_uuid = e.uuid
-    expect = _snapshot(kp)
-    _put(e, field, value, protect)
-    expect[str(e.uuid)] = None  # the target entry is verified separately
-    if _fingerprint(db) != before:
-        raise WriteError("database file changed while working; nothing written")
-    kp.save()
+        def mutate(k: PyKeePass) -> None:
+            target = next(x for x in k.entries if str(x.uuid) == uid)
+            snapshot(target)
+            _put(target, field, wanted, keep)
 
-    again = pykeepass_open(db, kp.password, kp.keyfile)
-    after = _snapshot(again)
-    target = again.find_entries(uuid=target_uuid, first=True)  # by uuid: a Title change alters the path
-    problems = []
-    if target is None or _get(target, field) != value:
-        problems.append(f"{field} not set as expected")
-    if len(after) != len(expect):
-        problems.append(f"entry count changed ({len(expect)} -> {len(after)})")
-    changed = [u for u, d in expect.items() if d is not None and after.get(u) != d]
-    if changed:
-        problems.append(f"{len(changed)} other entries differ after save")
-    if problems:
-        raise WriteError("verification failed: " + "; ".join(problems) + ". Restore from your own backup.")
-    return change.model_copy(update={"applied": True})
+        def verify(again: PyKeePass) -> list[str]:
+            target = next((x for x in again.entries if str(x.uuid) == uid), None)  # by uuid: Title changes the path
+            if target is None or _get(target, field) != wanted:
+                return [f"{field} not set as expected"]
+            if field not in STANDARD_ATTR and bool(target.is_custom_property_protected(field)) != keep:
+                return [f"{field} does not have the expected protection"]
+            return []
+
+        return Plan(change=change, mutate=mutate, touched={uid}, verify=verify)
+
+    return execute(open_db, db, build, True)  # the caller decided to write
 
 
 def _link_value(kp: PyKeePass, account: str, target: str, plain: bool, account_username: str | None,

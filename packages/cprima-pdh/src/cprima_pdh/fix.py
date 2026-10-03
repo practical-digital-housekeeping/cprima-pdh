@@ -13,11 +13,13 @@ from typing import TYPE_CHECKING, Callable
 from .models import FixAction, FixPlan
 from .backends.kdbx import OTP_PREFIXES, STANDARD_ATTR
 from .schema import SchemaSet, _bind, lookup_term, vocabulary_index
-from .source import _gpath, _in_bin, pykeepass_open
-from .write import WriteError, _fingerprint, _lock_files, find_entry
+from .source import _gpath, _in_bin
+from .write import WriteError, find_entry
 
 if TYPE_CHECKING:
     from pykeepass import PyKeePass
+
+    from .txn import Plan
 
 _RESERVED = tuple(STANDARD_ATTR)  # the standard fields: not custom fields, so never renamed or treated as one
 
@@ -92,58 +94,49 @@ def _plan_result(actions: list[FixAction], touched: int, applied: bool) -> FixPl
     return FixPlan(applied=applied, entries_touched=touched, counts=counts, actions=actions)
 
 
-def _commit(kp: PyKeePass, db: Path, before: tuple[int, int], ops: list[_Op], actions: list[FixAction]) -> FixPlan:
-    """Apply ops, save once, reopen and verify. Raises WriteError if anything looks off."""
-    if locks := _lock_files(db):
-        raise WriteError(f"database seems open elsewhere (lock file {locks[0].name}); close it first")
+def _plan_from_ops(ops: list[_Op], actions: list[FixAction]) -> "Plan":
+    """A `txn.Plan` for field renames and protection changes: history snapshot per touched entry, then the changes."""
+    from .txn import Plan, snapshot
 
-    touched_uuids = {str(o.entry.uuid) for o in ops}  # by uuid: pykeepass makes new wrapper objects per access
-    # what every entry must look like after saving
-    untouched = {str(e.uuid): (_base(e), _custom(e)) for e in kp.entries if str(e.uuid) not in touched_uuids}
-    expect: dict[str, dict] = {}
+    touched = {str(o.entry.uuid) for o in ops}
+    report = _plan_result(actions, len(touched), False)
+    if not ops:
+        return Plan(change=report)
+    expect: dict[str, dict] = {}  # what every touched entry must look like after saving
     for o in ops:
         value = o.entry.get_custom_property(o.key) or ""  # kept in memory, never reported
         exp = expect.setdefault(str(o.entry.uuid), {"base": _base(o.entry), "fields": {}, "gone": set()})
         exp["fields"][o.target] = (_digest(value), o.protect)
         if o.target != o.key:
             exp["gone"].add(o.key)
-    total = len(list(kp.entries))
 
-    for o in ops:
-        value = o.entry.get_custom_property(o.key) or ""
-        if o.target != o.key:
-            o.entry.delete_custom_property(o.key)
-        o.entry.set_custom_property(o.target, value, protect=o.protect)
+    def mutate(_kp: PyKeePass) -> None:
+        for entry in {str(o.entry.uuid): o.entry for o in ops}.values():
+            snapshot(entry)
+        for o in ops:
+            value = o.entry.get_custom_property(o.key) or ""
+            if o.target != o.key:
+                o.entry.delete_custom_property(o.key)
+            o.entry.set_custom_property(o.target, value, protect=o.protect)
 
-    if _fingerprint(db) != before:
-        raise WriteError("database file changed while working; nothing written")
-    kp.save()
+    def verify(again: PyKeePass) -> list[str]:
+        problems: list[str] = []
+        entries = {str(e.uuid): e for e in again.entries}
+        for uid, exp in expect.items():
+            e = entries.get(uid)
+            if e is None or _base(e) != exp["base"]:
+                problems.append("a touched entry changed outside its custom fields")
+                continue
+            props = e.custom_properties or {}
+            for key, (vdigest, prot) in exp["fields"].items():
+                if key not in props or _digest(props[key]) != vdigest or _protected(e, key) != prot:
+                    problems.append("a field does not have the expected name, value or protection")
+                    break
+            if exp["gone"] & set(props):
+                problems.append("a renamed field still exists under its old name")
+        return problems
 
-    again = pykeepass_open(db, kp.password, kp.keyfile)
-    problems: list[str] = []
-    entries = {str(e.uuid): e for e in again.entries}
-    if len(entries) != total:
-        problems.append(f"entry count changed ({total} -> {len(entries)})")
-    for uid, (base, custom) in untouched.items():
-        e = entries.get(uid)
-        if e is None or (_base(e), _custom(e)) != (base, custom):
-            problems.append("an entry that should be unchanged differs")
-            break
-    for uid, exp in expect.items():
-        e = entries.get(uid)
-        if e is None or _base(e) != exp["base"]:
-            problems.append("a touched entry changed outside its custom fields")
-            continue
-        props = e.custom_properties or {}
-        for key, (vdigest, prot) in exp["fields"].items():
-            if key not in props or _digest(props[key]) != vdigest or _protected(e, key) != prot:
-                problems.append("a field does not have the expected name, value or protection")
-                break
-        if exp["gone"] & set(props):
-            problems.append("a renamed field still exists under its old name")
-    if problems:
-        raise WriteError("verification failed: " + "; ".join(sorted(set(problems))) + ". Restore from your own backup.")
-    return _plan_result(actions, len(touched_uuids), True)
+    return Plan(change=report, mutate=mutate, touched=touched, verify=verify)
 
 
 def run_fix(
@@ -154,12 +147,13 @@ def run_fix(
     renames: bool = True,
     protection: bool = True,
 ) -> FixPlan:
-    before = _fingerprint(db)
-    kp = open_db()
-    ops, actions = _plan(kp, sset, renames, protection)
-    if not apply or not ops:
-        return _plan_result(actions, len({str(o.entry.uuid) for o in ops}), False)
-    return _commit(kp, db, before, ops, actions)
+    """Apply the vocabulary to every entry: canonical names and fixed protection (see `txn.execute`)."""
+    from .txn import execute
+
+    def build(kp: PyKeePass):
+        return _plan_from_ops(*_plan(kp, sset, renames, protection))
+
+    return execute(open_db, db, build, apply)
 
 
 def _check_names(old: str, new: str) -> None:
@@ -208,12 +202,9 @@ def rename_field_all(
     under: str | None = None,
 ) -> FixPlan:
     """Rename one custom field on every live entry that has it, keeping value and protection. One save, verified."""
-    before = _fingerprint(db)
-    kp = open_db()
-    ops, actions = _plan_rename_all(kp, old, new, under)
-    if not apply or not ops:
-        return _plan_result(actions, len(ops), False)
-    return _commit(kp, db, before, ops, actions)
+    from .txn import execute
+
+    return execute(open_db, db, lambda kp: _plan_from_ops(*_plan_rename_all(kp, old, new, under)), apply)
 
 
 def rename_field(
@@ -226,17 +217,17 @@ def rename_field(
     username: str | None = None,
 ) -> FixPlan:
     """Rename one custom field on one entry, keeping its value and protection."""
-    before = _fingerprint(db)
-    kp = open_db()
-    e = find_entry(kp, path, username)
-    props = e.custom_properties or {}
-    _check_names(old, new)
-    if old not in props:
-        raise WriteError(f"{path!r} has no custom field {old!r}")
-    if new in props:
-        raise WriteError(f"{new!r} already exists on {path!r}")
-    ops = [_Op(entry=e, ref=path, key=old, target=new, protect=_protected(e, old))]
-    actions = [FixAction(entry=path, key=old, action="rename", new_key=new)]
-    if not apply:
-        return _plan_result(actions, 1, False)
-    return _commit(kp, db, before, ops, actions)
+    from .txn import execute
+
+    def build(kp: PyKeePass):
+        e = find_entry(kp, path, username)
+        props = e.custom_properties or {}
+        _check_names(old, new)
+        if old not in props:
+            raise WriteError(f"{path!r} has no custom field {old!r}")
+        if new in props:
+            raise WriteError(f"{new!r} already exists on {path!r}")
+        return _plan_from_ops([_Op(entry=e, ref=path, key=old, target=new, protect=_protected(e, old))],
+                              [FixAction(entry=path, key=old, action="rename", new_key=new)])
+
+    return execute(open_db, db, build, apply)

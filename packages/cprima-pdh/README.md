@@ -20,11 +20,24 @@ pykeepass; the method commands (`pdh method ...`) work without it.
 |---|---|
 | `pdh doctor` | overview in three sections: setup, file (format and key derivation from the header, lock files, sync conflicts, size drivers) and method (owners, areas, record types, vocabulary, conformance, hygiene, relations) |
 | `pdh session` | `unlock`, `lock`, `status`: cache the master password for a while (Windows DPAPI) |
-| `pdh inspect` | `inventory`, `tree`, `entries`, `tags`, `totp`, `find`, `show`, `read`, `links`, `unclassified`, `fields` |
-| `pdh check` | `conform` (the default), `validate`: findings with levels ERROR / WARN / INFO and, per issue, an action |
-| `pdh edit` | `set`, `link`, `rename-field`, `vocabulary`, `new-entry`, `new-group`, `move`: dry run unless `--apply` |
+| `pdh inspect` | `inventory`, `tree`, `entries` (`--expired`, `--expiring DAYS`), `tags`, `totp`, `find` (`--in-fields`), `show`, `read`, `links`, `unclassified`, `fields`, `history`, `attachments`, `otp` (the current code, never the secret) |
+| `pdh check` | `conform` (the default), `validate`: findings with levels ERROR / WARN / INFO and, per issue, an action; `known-passwords` and `breaches` (online, only with `--online`) |
+| `pdh edit` | `set`, `link`, `rename-field` (one entry or `--all`), `vocabulary`, `new-entry`, `new-group`, `move`, `delete` (to the recycle bin), `restore`, `purge` (only from the bin), `clone`, `tags`, `expiry`, `icon`, `color`, `override-url`, `autotype`, `history-restore`, `history-prune`, `attach`, `detach`, `rename-group`, `move-group`, `delete-group`, `group-notes`, `group-icon`: dry run unless `--apply`; every edit keeps the previous state in the entry's history |
+| `pdh db` | `create`, `password`, `keyfile`, `settings`, `kdf`, `empty-bin`: the database itself (dry run unless `--apply`; new passwords from an environment variable or a hidden prompt) |
+| `pdh io` | `import-csv`, `import-kdbx`, `merge` (by UUID and modification time, nothing deleted), `export-csv`, `export-kdbx`, `export-attachment`: the exports are the only writes outside the vault, only to `--out`, never over an existing file |
+| `pdh generate` | a password or passphrase from the system's secure random source; printed, never stored |
 | `pdh method` | `show`, `schemas`: the taxonomy, no vault needed |
 | `pdh backends` | installed backends |
+
+Every vault function a GUI client offers is a command; what pdh does not do is auto-type, browser integration and
+the graphical UI itself. KDBX 3 to 4 conversion is not offered (pykeepass cannot convert).
+
+Online checks never run without `--online`. `check known-passwords` sends only the first 5 characters of each SHA-1
+(k-anonymity); `check breaches` downloads the public breach catalogue and compares it with your URLs locally;
+`--accounts` (an API key in `HIBP_API_KEY`) is the one option that sends e-mail addresses. Level and advice of each
+finding come from the profile (`known-password`, `breach:*`); `--fail-on LEVEL` sets the exit code like `check validate`.
+
+What only a human with the real clients can verify is listed in `docs/manual-e2e.md`.
 
 Use `-f json` for machine-readable output.
 

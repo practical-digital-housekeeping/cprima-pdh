@@ -18,6 +18,7 @@ from .models import (
     EntryRecord,
     ExpiryStats,
     FieldStats,
+    HistoryStats,
     Inventory,
     QualityStats,
     StructureStats,
@@ -171,6 +172,19 @@ def _len_bucket(n: int) -> str:
     return "20+"
 
 
+def history_totals(entries) -> HistoryStats:
+    """Snapshots, how many entries have any, and their size: counts only, no content."""
+    from lxml import etree
+
+    versions = [h for e in entries for h in (e.history or [])]
+    return HistoryStats(snapshots=len(versions), entries_with_history=sum(1 for e in entries if e.history),
+                        bytes=sum(len(etree.tostring(h._element)) for h in versions))
+
+
+def attachment_bytes(kp: PyKeePass) -> int:
+    return sum(len(b) for b in (getattr(kp, "binaries", None) or []))
+
+
 def inventory(kp: PyKeePass, path: Path) -> Inventory:
     now = datetime.now(timezone.utc)
     recs = records(kp)
@@ -204,6 +218,7 @@ def inventory(kp: PyKeePass, path: Path) -> Inventory:
         with_notes=sum(1 for r in recs if r.notes_length),
         with_attachments=sum(1 for r in recs if r.attachments),
         attachment_count=sum(r.attachments for r in recs),
+        attachment_bytes=attachment_bytes(kp),
         custom_field_names=dict(custom),
     )
 
@@ -251,4 +266,5 @@ def inventory(kp: PyKeePass, path: Path) -> Inventory:
             password_equals_username=pw_eq_user,
         ),
         structure=structure,
+        history=history_totals(raw),
     )

@@ -20,6 +20,18 @@ STANDARD_PROTECTED = frozenset({"Password", "otp"})
 OTP_PREFIXES = ("TimeOtp-", "HmacOtp-")
 OTP_STYLES = {"TimeOtp-": "TimeOtp", "HmacOtp-": "HmacOtp"}  # prefix -> the style reported for an entry
 
+
+def plugin_otp(custom: dict[str, str]) -> dict | None:
+    """The settings of a KeePass 2 OTP plugin entry (from its custom fields), normalised; None if it has none."""
+    secret = custom.get("TimeOtp-Secret-Base32")
+    if not secret:
+        return None
+    algorithm = {"HMAC-SHA-1": "SHA1", "HMAC-SHA-256": "SHA256", "HMAC-SHA-512": "SHA512"}.get(
+        custom.get("TimeOtp-Algorithm", "HMAC-SHA-1"), "SHA1")
+    return {"secret": secret, "digits": int(custom.get("TimeOtp-Length", "6") or 6),
+            "period": int(custom.get("TimeOtp-Period", "30") or 30), "algorithm": algorithm}
+
+
 # how each field kind of the profile is represented in a KDBX entry
 KIND_STORAGE = {
     "text": "custom string field",

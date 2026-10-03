@@ -2,11 +2,16 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 from typing import Annotated, Optional
 
 import typer
 
+from .. import attachments as attachments_mod
+from .. import entries as entries_mod
+from .. import history as history_mod
 from .. import fix as fix_mod
+from .. import groups as groups_mod
 from .. import organize as organize_mod
 from .. import write as write_mod
 from ..render import Format
@@ -38,17 +43,20 @@ def set_field(
     apply: c.Apply = False,
     overwrite: Annotated[bool, typer.Option("--overwrite", help="Replace a non-empty value.")] = False,
     protect: Annotated[bool, typer.Option("--protect", help="Mark a custom field as protected.")] = False,
+    unprotect: Annotated[bool, typer.Option("--unprotect", help="Remove the protection of a custom field.")] = False,
     username: Username = None,
 ) -> None:
-    """Set one field on one entry."""
+    """Set one field on one entry. An existing protection is kept unless --unprotect; the old state goes to the history."""
+    if protect and unprotect:
+        c.fail("--protect and --unprotect exclude each other")
     if value == "-":
         value = typer.prompt("Value", hide_input=True, err=True)
     db, opener = _vault(ctx)
     try:
         if apply:
-            change = write_mod.apply_set(opener, db, path, field, value, overwrite, protect, username)
+            change = write_mod.apply_set(opener, db, path, field, value, overwrite, protect, username, unprotect)
         else:
-            change = write_mod.plan_set(opener(), path, field, value, overwrite, protect, username)
+            change = write_mod.plan_set(opener(), path, field, value, overwrite, protect, username, unprotect)
     except write_mod.WriteError as exc:
         _refused(exc)
     c.emit(change, fmt)
@@ -85,6 +93,264 @@ def link(
         raise typer.Exit(1)
 
 
+@app.command("delete")
+def delete(ctx: typer.Context, path: EntryPath, fmt: c.Fmt = Format.text, apply: c.Apply = False,
+           username: Username = None) -> None:
+    """Move an entry to the recycle bin (never a permanent delete)."""
+    db, opener = _vault(ctx)
+    try:
+        change = entries_mod.delete_entry(opener, db, path, apply, username)
+    except write_mod.WriteError as exc:
+        _refused(exc)
+    c.emit(change, fmt)
+
+
+@app.command("restore")
+def restore(
+    ctx: typer.Context, path: EntryPath, fmt: c.Fmt = Format.text, apply: c.Apply = False, username: Username = None,
+    to: Annotated[Optional[str], typer.Option("--to", help="Group to restore into (else where a client recorded it).")] = None,
+) -> None:
+    """Move an entry out of the recycle bin."""
+    db, opener = _vault(ctx)
+    try:
+        change = entries_mod.restore_entry(opener, db, path, apply, to, username)
+    except write_mod.WriteError as exc:
+        _refused(exc)
+    c.emit(change, fmt)
+
+
+@app.command("purge")
+def purge(ctx: typer.Context, path: EntryPath, fmt: c.Fmt = Format.text, apply: c.Apply = False,
+          username: Username = None) -> None:
+    """Delete an entry permanently; only entries already in the recycle bin."""
+    db, opener = _vault(ctx)
+    try:
+        change = entries_mod.purge_entry(opener, db, path, apply, username)
+    except write_mod.WriteError as exc:
+        _refused(exc)
+    c.emit(change, fmt)
+
+
+@app.command("tags")
+def tags(
+    ctx: typer.Context, path: EntryPath, fmt: c.Fmt = Format.text, apply: c.Apply = False, username: Username = None,
+    add: Annotated[Optional[list[str]], typer.Option("--add", help="Tag to add (repeat for several).")] = None,
+    remove: Annotated[Optional[list[str]], typer.Option("--remove", help="Tag to remove (repeat for several).")] = None,
+) -> None:
+    """Add or remove tags on an entry (the previous state is kept in its history)."""
+    if not add and not remove:
+        c.fail("nothing to do: give --add and/or --remove")
+    db, opener = _vault(ctx)
+    try:
+        change = entries_mod.change_tags(opener, db, path, add or [], remove or [], apply, username)
+    except write_mod.WriteError as exc:
+        _refused(exc)
+    c.emit(change, fmt)
+
+
+@app.command("expiry")
+def expiry(
+    ctx: typer.Context, path: EntryPath,
+    date: Annotated[Optional[str], typer.Argument(help="YYYY-MM-DD (midnight UTC).")] = None,
+    fmt: c.Fmt = Format.text, apply: c.Apply = False, username: Username = None,
+    clear: Annotated[bool, typer.Option("--clear", help="Remove the expiry.")] = False,
+) -> None:
+    """Set or clear the expiry date of an entry."""
+    db, opener = _vault(ctx)
+    try:
+        change = entries_mod.set_expiry(opener, db, path, date, clear, apply, username)
+    except write_mod.WriteError as exc:
+        _refused(exc)
+    c.emit(change, fmt)
+
+
+@app.command("clone")
+def clone(
+    ctx: typer.Context, path: EntryPath, fmt: c.Fmt = Format.text, apply: c.Apply = False, username: Username = None,
+    title: Annotated[Optional[str], typer.Option("--title", help="Title of the copy (default: '<title> - copy').")] = None,
+) -> None:
+    """Duplicate an entry next to the original (new UUID; fields, tags, expiry and attachments are copied)."""
+    db, opener = _vault(ctx)
+    try:
+        change = entries_mod.clone_entry(opener, db, path, title, apply, username)
+    except write_mod.WriteError as exc:
+        _refused(exc)
+    c.emit(change, fmt)
+
+
+@app.command("icon")
+def icon(ctx: typer.Context, path: EntryPath,
+         icon_number: Annotated[int, typer.Argument(help="Standard icon number, 0..68.")],
+         fmt: c.Fmt = Format.text, apply: c.Apply = False, username: Username = None) -> None:
+    """Set the icon of an entry."""
+    db, opener = _vault(ctx)
+    try:
+        change = entries_mod.set_icon(opener, db, path, icon_number, apply, username)
+    except write_mod.WriteError as exc:
+        _refused(exc)
+    c.emit(change, fmt)
+
+
+@app.command("color")
+def color(
+    ctx: typer.Context, path: EntryPath, fmt: c.Fmt = Format.text, apply: c.Apply = False, username: Username = None,
+    fg: Annotated[Optional[str], typer.Option("--fg", help="Foreground, #RRGGBB.")] = None,
+    bg: Annotated[Optional[str], typer.Option("--bg", help="Background, #RRGGBB.")] = None,
+    clear: Annotated[bool, typer.Option("--clear", help="Remove both colours.")] = False,
+) -> None:
+    """Set the colours of an entry."""
+    db, opener = _vault(ctx)
+    try:
+        change = entries_mod.set_color(opener, db, path, fg, bg, clear, apply, username)
+    except write_mod.WriteError as exc:
+        _refused(exc)
+    c.emit(change, fmt)
+
+
+@app.command("override-url")
+def override_url(ctx: typer.Context, path: EntryPath,
+                 url: Annotated[str, typer.Argument(help="URL (or command) to open instead; empty removes it.")],
+                 fmt: c.Fmt = Format.text, apply: c.Apply = False, username: Username = None) -> None:
+    """Set the URL override of an entry."""
+    db, opener = _vault(ctx)
+    try:
+        change = entries_mod.set_override_url(opener, db, path, url, apply, username)
+    except write_mod.WriteError as exc:
+        _refused(exc)
+    c.emit(change, fmt)
+
+
+@app.command("autotype")
+def autotype(
+    ctx: typer.Context, path: EntryPath, fmt: c.Fmt = Format.text, apply: c.Apply = False, username: Username = None,
+    enabled: Annotated[Optional[bool], typer.Option("--enabled/--disabled", help="Switch auto-type on or off.")] = None,
+    sequence: Annotated[Optional[str], typer.Option("--sequence", help="Auto-type keystroke sequence.")] = None,
+) -> None:
+    """Enable, disable or set the auto-type sequence of an entry."""
+    db, opener = _vault(ctx)
+    try:
+        change = entries_mod.set_autotype(opener, db, path, enabled, sequence, apply, username)
+    except write_mod.WriteError as exc:
+        _refused(exc)
+    c.emit(change, fmt)
+
+
+@app.command("history-restore")
+def history_restore(ctx: typer.Context, path: EntryPath,
+                    index: Annotated[int, typer.Argument(help="Which snapshot, from `inspect history` (0 is the oldest).")],
+                    fmt: c.Fmt = Format.text, apply: c.Apply = False, username: Username = None) -> None:
+    """Restore an entry to one of its history snapshots (the current state goes to the history first)."""
+    db, opener = _vault(ctx)
+    try:
+        change = history_mod.restore_history(opener, db, path, index, apply, username)
+    except write_mod.WriteError as exc:
+        _refused(exc)
+    c.emit(change, fmt)
+
+
+@app.command("history-prune")
+def history_prune(
+    ctx: typer.Context, fmt: c.Fmt = Format.text, apply: c.Apply = False, username: Username = None,
+    path: Annotated[Optional[str], typer.Argument(help="One entry; default every entry.")] = None,
+    keep: Annotated[int, typer.Option("--keep", help="Snapshots to keep per entry (the newest).")] = 0,
+) -> None:
+    """Remove old history snapshots: old values (passwords included) live there."""
+    db, opener = _vault(ctx)
+    try:
+        plan = history_mod.prune_history(opener, db, keep, apply, path, username)
+    except write_mod.WriteError as exc:
+        _refused(exc)
+    c.emit(plan, fmt)
+
+
+@app.command("attach")
+def attach(ctx: typer.Context, path: EntryPath, file: Annotated[Path, typer.Argument(help="The file to attach.")],
+           fmt: c.Fmt = Format.text, apply: c.Apply = False, username: Username = None,
+           name: Annotated[Optional[str], typer.Option("--name", help="Attachment name (default: the file name).")] = None) -> None:
+    """Attach a file to an entry."""
+    db, opener = _vault(ctx)
+    try:
+        change = attachments_mod.attach_file(opener, db, path, file, apply, name, username)
+    except write_mod.WriteError as exc:
+        _refused(exc)
+    c.emit(change, fmt)
+
+
+@app.command("detach")
+def detach(ctx: typer.Context, path: EntryPath, name: Annotated[str, typer.Argument(help="Attachment name.")],
+           fmt: c.Fmt = Format.text, apply: c.Apply = False, username: Username = None) -> None:
+    """Remove an attachment from an entry."""
+    db, opener = _vault(ctx)
+    try:
+        change = attachments_mod.detach_file(opener, db, path, name, apply, username)
+    except write_mod.WriteError as exc:
+        _refused(exc)
+    c.emit(change, fmt)
+
+
+GroupPath = Annotated[str, typer.Argument(help="Group path as shown by `pdh inspect tree`.")]
+
+
+@app.command("rename-group")
+def rename_group(ctx: typer.Context, group: GroupPath, name: Annotated[str, typer.Argument(help="New name.")],
+                 fmt: c.Fmt = Format.text, apply: c.Apply = False) -> None:
+    """Rename a group."""
+    db, opener = _vault(ctx)
+    try:
+        change = groups_mod.rename_group(opener, db, group, name, apply)
+    except write_mod.WriteError as exc:
+        _refused(exc)
+    c.emit(change, fmt)
+
+
+@app.command("move-group")
+def move_group(ctx: typer.Context, group: GroupPath, dest: Annotated[str, typer.Argument(help="New parent group.")],
+               fmt: c.Fmt = Format.text, apply: c.Apply = False,
+               cross_top_level: Annotated[bool, typer.Option("--cross-top-level", help="Allow moving between top-level groups.")] = False) -> None:
+    """Move a group, with everything in it, below another group."""
+    db, opener = _vault(ctx)
+    try:
+        change = groups_mod.move_group(opener, db, group, dest, apply, cross_top_level)
+    except write_mod.WriteError as exc:
+        _refused(exc)
+    c.emit(change, fmt)
+
+
+@app.command("delete-group")
+def delete_group(ctx: typer.Context, group: GroupPath, fmt: c.Fmt = Format.text, apply: c.Apply = False) -> None:
+    """Move a group, with everything in it, to the recycle bin."""
+    db, opener = _vault(ctx)
+    try:
+        change = groups_mod.delete_group(opener, db, group, apply)
+    except write_mod.WriteError as exc:
+        _refused(exc)
+    c.emit(change, fmt)
+
+
+@app.command("group-notes")
+def group_notes(ctx: typer.Context, group: GroupPath, text: Annotated[str, typer.Argument(help="The notes of the group.")],
+                fmt: c.Fmt = Format.text, apply: c.Apply = False) -> None:
+    """Set the notes of a group."""
+    db, opener = _vault(ctx)
+    try:
+        change = groups_mod.set_group_notes(opener, db, group, text, apply)
+    except write_mod.WriteError as exc:
+        _refused(exc)
+    c.emit(change, fmt)
+
+
+@app.command("group-icon")
+def group_icon(ctx: typer.Context, group: GroupPath, icon_number: Annotated[int, typer.Argument(help="Standard icon number, 0..68.")],
+               fmt: c.Fmt = Format.text, apply: c.Apply = False) -> None:
+    """Set the icon of a group."""
+    db, opener = _vault(ctx)
+    try:
+        change = groups_mod.set_group_icon(opener, db, group, icon_number, apply)
+    except write_mod.WriteError as exc:
+        _refused(exc)
+    c.emit(change, fmt)
+
+
 @app.command("rename-field")
 def rename_field(
     ctx: typer.Context,
@@ -97,7 +363,8 @@ def rename_field(
     under: Annotated[Optional[str], typer.Option(
         "--under", help="With --all: only entries below this group (e.g. one owner).")] = None,
 ) -> None:
-    """Rename a custom field, keeping value and protection: on one entry, or with --all on every entry."""
+    """Rename a custom field, keeping value and protection: on one entry, or with --all on every entry. Each changed
+    entry keeps its previous state in the history."""
     wanted = 2 if all_entries else 3
     if len(names) != wanted:
         c.fail(f"expected {'OLD NEW' if all_entries else 'PATH OLD NEW'}, got {len(names)} argument(s)")
@@ -122,7 +389,8 @@ def vocabulary(
     renames: Annotated[bool, typer.Option("--renames/--no-renames", help="Rename aliases to the canonical name.")] = True,
     protection: Annotated[bool, typer.Option("--protection/--no-protection", help="Set each term's fixed protection.")] = True,
 ) -> None:
-    """Apply the vocabulary to every entry: canonical names and fixed protection."""
+    """Apply the vocabulary to every entry: canonical names and fixed protection. Each changed entry keeps its
+    previous state in the history (undo with history-restore, trim with history-prune)."""
     db, opener = _vault(ctx)
     try:
         plan = fix_mod.run_fix(opener, db, c.load_taxonomy(c.state(ctx)), apply, renames, protection)
@@ -140,14 +408,38 @@ def new_entry(
     fmt: c.Fmt = Format.text,
     password_env: Annotated[str, typer.Option("--password-env", help="Environment variable holding the password.")] = "PDH_NEW_PASSWORD",
     apply: c.Apply = False,
+    url: Annotated[Optional[str], typer.Option("--url", help="The entry's URL.")] = None,
+    notes: Annotated[Optional[str], typer.Option("--notes", help="The entry's notes.")] = None,
+    tag: Annotated[Optional[list[str]], typer.Option("--tag", help="A tag (repeat for several).")] = None,
+    expires: Annotated[Optional[str], typer.Option("--expires", help="Expiry date, YYYY-MM-DD.")] = None,
+    field: Annotated[Optional[list[str]], typer.Option("--field", help="A custom field NAME=VALUE (repeat).")] = None,
+    secret_field: Annotated[Optional[list[str]], typer.Option(
+        "--secret-field", help="A protected custom field NAME=ENVVAR; the value is read from that environment variable.")] = None,
 ) -> None:
-    """Create an entry with standard fields. The password comes from an environment variable, never from argv."""
+    """Create an entry in one call. Passwords and secret values come from environment variables, never from argv."""
     password = os.environ.get(password_env, "")
     if not password:
         c.fail(f"write refused: environment variable {password_env} is empty")
+
+    def pairs(items: list[str] | None, what: str) -> dict[str, str]:
+        out: dict[str, str] = {}
+        for item in items or []:
+            name, sep, value = item.partition("=")
+            if not sep or not name:
+                c.fail(f"{what} needs NAME=VALUE, got {item!r}")
+            out[name] = value
+        return out
+
+    fields = pairs(field, "--field")
+    secrets: dict[str, str] = {}
+    for name, var in pairs(secret_field, "--secret-field").items():
+        if var not in os.environ or not os.environ[var]:
+            c.fail(f"write refused: environment variable {var} (for --secret-field {name}) is empty")
+        secrets[name] = os.environ[var]
     db, opener = _vault(ctx)
     try:
-        change = organize_mod.new_entry(opener, db, group, title, username, password, apply)
+        change = organize_mod.new_entry(opener, db, group, title, username, password, apply, url, notes, tag, expires,
+                                        fields, secrets)
     except write_mod.WriteError as exc:
         _refused(exc)
     c.emit(change, fmt)

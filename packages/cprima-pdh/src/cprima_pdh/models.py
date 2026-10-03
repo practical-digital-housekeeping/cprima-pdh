@@ -104,6 +104,7 @@ class FieldStats(Frozen):
     with_notes: int
     with_attachments: int
     attachment_count: int
+    attachment_bytes: int = 0  # total size of the attached files; never their content
     custom_field_names: dict[str, int]
 
 
@@ -140,6 +141,139 @@ class OrgChange(Frozen):
     target: str  # the new group's path, or the entry being moved
     dest: str  # parent group (new-group) or destination group (move)
     applied: bool = False
+
+
+class HistorySnapshot(Frozen):
+    index: int  # 0 is the oldest
+    modified: datetime | None = None
+    changed: list[str] = Field(default_factory=list)  # names of what differs from the next newer state; never values
+
+
+class HistoryReport(Frozen):
+    entry: str
+    snapshots: list[HistorySnapshot]
+
+
+class HistoryPrune(Frozen):
+    keep: int
+    entries: int  # entries that lose snapshots
+    removed: int  # snapshots removed (or to be removed)
+    applied: bool = False
+
+
+class AttachmentItem(Frozen):
+    name: str
+    size: int  # bytes of the content; the content itself is never reported
+
+
+class AttachmentsReport(Frozen):
+    entry: str
+    attachments: list[AttachmentItem]
+
+
+class DbSettings(Frozen):
+    name: str
+    description: str
+    history_max_items: int  # -1 = unlimited
+    history_max_size: int  # bytes, -1 = unlimited
+    recycle_bin: bool
+    changed: list[str] = Field(default_factory=list)  # settings that differ from what was asked for
+    applied: bool = False
+
+
+class DbKdf(Frozen):
+    algorithm: str
+    iterations: int | None = None
+    memory_kib: int | None = None
+    parallelism: int | None = None
+    applied: bool = False
+
+
+class DbBin(Frozen):
+    entries: int  # entries in the recycle bin (to be) deleted for good
+    groups: int
+    applied: bool = False
+
+
+class FileWritten(Frozen):
+    """The result of an export: which file was written and how much; never a value."""
+    kind: str  # attachment | csv | kdbx
+    path: str
+    entries: int
+    bytes: int
+
+
+class ImportReport(Frozen):
+    kind: str  # csv | vault
+    source: str
+    entries: int
+    groups: int  # groups that would be (or were) created
+    columns: list[str] = Field(default_factory=list)  # CSV columns that become custom fields
+    applied: bool = False
+
+
+class MergeReport(Frozen):
+    source: str
+    added: int  # entries only the other copy has
+    updated: int  # entries whose newer state came from the other copy
+    moved: int
+    trashed: int  # moved to the recycle bin because the other copy has them there
+    unchanged: int
+    skipped: int  # in the other copy's bin or deleted here: not brought back
+    entries: list[str] = Field(default_factory=list)  # paths of the entries that change
+    applied: bool = False
+
+
+class Generated(Frozen):
+    """A generated password or passphrase. It is printed on purpose: the owner asked for it."""
+    kind: str  # password | passphrase
+    value: str
+    entropy_bits: float
+
+
+class OtpCode(Frozen):
+    code: str
+    period: int
+    valid_for: int  # seconds until it changes; 0 for a counter-based code
+
+
+class OnlineFinding(Frozen):
+    """What every online result carries once the profile has judged it (see `online.judge`)."""
+    rule: str = ""
+    level: Level = "WARN"
+    action: str = ""
+    note: str = ""
+
+
+class KnownPassword(OnlineFinding):
+    entry: str
+    count: int  # how often the password appears in known leaks
+
+
+class KnownPasswordsReport(Frozen):
+    source: str  # online | file
+    checked: int  # entries with a password
+    exposed: list[KnownPassword]  # entry paths and counts; never a password or a hash
+
+
+class BreachHit(OnlineFinding):
+    entry: str
+    breach: str
+    domain: str
+    breach_date: str
+    data_classes: list[str]
+    changed_since: bool  # the entry was last changed on or after the breach date
+
+
+class AccountHit(OnlineFinding):
+    entry: str
+    breaches: list[str]
+
+
+class BreachReport(Frozen):
+    catalogue: int  # breaches in the public catalogue
+    hits: list[BreachHit]
+    accounts: list[AccountHit] = Field(default_factory=list)
 
 
 class FixAction(Frozen):
@@ -393,6 +527,12 @@ class ValidationReport(Frozen):
     findings: list[RuleFinding]
 
 
+class HistoryStats(Frozen):
+    snapshots: int = 0  # older versions of entries kept in their History
+    entries_with_history: int = 0
+    bytes: int = 0  # size of those versions in the file (old values live there)
+
+
 class Inventory(Frozen):
     meta: DbMeta
     entries: int
@@ -408,3 +548,4 @@ class Inventory(Frozen):
     duplicates: DuplicateStats
     quality: QualityStats
     structure: StructureStats
+    history: HistoryStats = HistoryStats()
