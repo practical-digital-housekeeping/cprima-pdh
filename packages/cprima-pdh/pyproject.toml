@@ -1,6 +1,6 @@
 [project]
 name = "cprima-pdh"
-version = "0.0.3"
+version = "0.0.4"
 description = "Practical Digital Housekeeping: check and tidy your KeePass vault against a written taxonomy."
 readme = "README.md"
 requires-python = ">=3.11"
