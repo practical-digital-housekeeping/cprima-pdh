@@ -11,7 +11,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from .models import FileWritten
-from .source import _gpath, _in_bin, pykeepass_open, save_vault, stored_header_hash_ok
+from .source import pykeepass_open, save_vault, stored_header_hash_ok
+from .vault import as_vault
 from .write import WriteError, find_entry
 
 if TYPE_CHECKING:
@@ -41,30 +42,27 @@ def export_attachment(kp: PyKeePass, path: str, name: str, out: Path, username: 
     return FileWritten(kind="attachment", path=str(out), entries=1, bytes=len(content))
 
 
-def _live(kp: PyKeePass):
-    rb = kp.recyclebin_group
-    return [e for e in kp.entries if rb is None or not _in_bin(e.group, rb.uuid)]
+def _live(source):
+    return [e for e in as_vault(source).entries() if not e.in_bin]
 
 
 def export_csv(kp: PyKeePass, out: Path, with_secrets: bool = False) -> FileWritten:
     """Write the live entries (not the recycle bin) as CSV; secrets only with `with_secrets`."""
     entries = _live(kp)
-    custom = sorted({k for e in entries for k in (e.custom_properties or {})})
+    custom = sorted({k for e in entries for k in e.fields})
     head = ["Group", "Title", "UserName", *(["Password", "OTP"] if with_secrets else []), "URL", "Notes", "Tags",
             "Expires", *custom]
     buffer = io.StringIO(newline="")
     writer = csv.writer(buffer, lineterminator="\n")
     writer.writerow(head)
     for e in entries:
-        props = e.custom_properties or {}
-        row = [_gpath(e.group), e.title or "", e.username or ""]
+        row = [e.group_path, e.title, e.username]
         if with_secrets:
-            row += [e.password or "", e.otp or ""]
-        row += [e.url or "", e.notes or "", ";".join(e.tags or []),
-                e.expiry_time.date().isoformat() if e.expires and e.expiry_time else ""]
+            row += [e.password, e.otp]
+        row += [e.url, e.notes, ";".join(e.tags), e.expiry.date().isoformat() if e.expires and e.expiry else ""]
         for k in custom:
-            hidden = k in props and not with_secrets and e.is_custom_property_protected(k)
-            row.append("" if hidden or k not in props else props[k])
+            field = e.fields.get(k)
+            row.append("" if field is None or (field.protected and not with_secrets) else field.value)
         writer.writerow(row)
     data = buffer.getvalue().encode("utf-8")
     with _create_exclusive(out) as f:

@@ -18,7 +18,7 @@ from urllib.parse import quote, urlparse
 from . import net
 from .conform import _issue
 from .models import LEVEL_ORDER, AccountHit, BreachHit, BreachReport, KnownPassword, KnownPasswordsReport, RuleFinding
-from .source import _aware, _gpath, _in_bin
+from .vault import as_vault
 
 if TYPE_CHECKING:
     from pykeepass import PyKeePass
@@ -59,9 +59,8 @@ def worst_level(report) -> int:
     return max((LEVEL_ORDER[i.level] for i in items), default=0)
 
 
-def _live(kp: PyKeePass):
-    rb = kp.recyclebin_group
-    return [e for e in kp.entries if rb is None or not _in_bin(e.group, rb.uuid)]
+def _live(source):
+    return [e for e in as_vault(source).entries() if not e.in_bin]
 
 
 def _sha1(password: str) -> str:
@@ -72,7 +71,7 @@ def _by_hash(kp: PyKeePass) -> dict[str, list[str]]:
     out: dict[str, list[str]] = {}
     for e in _live(kp):
         if e.password:
-            out.setdefault(_sha1(e.password), []).append(f"{_gpath(e.group)}/{e.title}")
+            out.setdefault(_sha1(e.password), []).append(e.path)
     return out
 
 
@@ -148,21 +147,21 @@ def breach_report(kp: PyKeePass, accounts: bool = False, api_key: str = "") -> B
     hits: list[BreachHit] = []
     live = _live(kp)
     for e in live:
-        host = _host(e.url or "")
+        host = _host(e.url)
         if not host:
             continue
-        modified = _aware(e.mtime) or datetime.min.replace(tzinfo=timezone.utc)
+        modified = e.mtime or datetime.min.replace(tzinfo=timezone.utc)
         for b, domain in with_domain:
             if host == domain or host.endswith("." + domain):
                 when = date.fromisoformat(b["BreachDate"]) if b.get("BreachDate") else date.min
-                hits.append(BreachHit(entry=f"{_gpath(e.group)}/{e.title}", breach=b["Name"], domain=domain,
+                hits.append(BreachHit(entry=e.path, breach=b["Name"], domain=domain,
                                       breach_date=when.isoformat(), data_classes=list(b.get("DataClasses") or []),
                                       changed_since=modified.date() >= when))
     found: list[AccountHit] = []
     if accounts:
         asked = False
         for e in live:
-            address = (e.username or "").strip()
+            address = e.username.strip()
             if not _EMAIL.fullmatch(address):
                 continue
             if asked:
@@ -177,5 +176,5 @@ def breach_report(kp: PyKeePass, accounts: bool = False, api_key: str = "") -> B
                 raise
             names = [b["Name"] for b in json.loads(body.decode("utf-8"))]
             if names:
-                found.append(AccountHit(entry=f"{_gpath(e.group)}/{e.title}", breaches=names))
+                found.append(AccountHit(entry=e.path, breaches=names))
     return BreachReport(catalogue=len(catalogue), hits=sorted(hits, key=lambda h: (h.entry, h.breach)), accounts=found)

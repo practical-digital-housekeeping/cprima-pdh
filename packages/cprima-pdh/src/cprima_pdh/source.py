@@ -96,6 +96,26 @@ def save_vault(kp: PyKeePass, filename: str | Path | None = None) -> None:
         raise
 
 
+_KDBX_SIGNATURE = bytes.fromhex("03d9a29a67fb4bb5")
+
+
+def file_kind(path: Path) -> str:
+    """"kdbx" or "sops", from the file content (extensions lie): the KDBX signature, else a sops block in JSON or YAML."""
+    try:
+        head = Path(path).read_bytes()[:4096]
+    except OSError:
+        return "kdbx"  # let the opener report the problem
+    if head[:8] == _KDBX_SIGNATURE:
+        return "kdbx"
+    try:
+        whole = Path(path).read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return "kdbx"
+    json_like = whole.lstrip().startswith("{") and '"sops"' in whole
+    yaml_like = any(line.startswith("sops:") for line in whole.splitlines())
+    return "sops" if json_like or yaml_like else "kdbx"
+
+
 def sidecar(path: Path) -> Path | None:
     """`<vault>.toml` next to the vault if it holds a `password` (test fixtures do), else None."""
     import tomllib
@@ -162,50 +182,42 @@ def _in_bin(group, bin_uuid) -> bool:
     return False
 
 
-def records(kp: PyKeePass, match: Callable | None = None) -> list[EntryRecord]:
-    rb = kp.recyclebin_group
-    bin_uuid = rb.uuid if rb is not None else None
+def _totp_style_of(e) -> str | None:
+    """How an entry's one-time password is stored: "otp" (the standard field) or an OTP plugin style, else None."""
+    if e.otp:
+        return "otp"
+    for prefix, style in OTP_STYLES.items():
+        if any(k.startswith(prefix) for k in e.fields):
+            return style
+    return None
+
+
+def records(source, match: Callable | None = None) -> list[EntryRecord]:
+    """One secret-free record per entry; `match` is a filter over snapshots (`EntryData`)."""
+    from .vault import as_vault
+
     out = []
-    for e in kp.entries:
+    for e in as_vault(source).entries():
         if match is not None and not match(e):
             continue
-        props = e.custom_properties or {}
-        out.append(
-            EntryRecord(
-                title=e.title or "",
-                group=_gpath(e.group),
-                username=e.username or "",
-                url=e.url or "",
-                tags=list(e.tags or []),
-                totp_style=_totp_style(e, props),
-                custom_fields=sorted(props),
-                attachments=len(e.attachments or []),
-                notes_length=len(e.notes or ""),
-                password_length=len(e.password or ""),
-                created=_aware(e.ctime),
-                modified=_aware(e.mtime),
-                accessed=_aware(e.atime),
-                expires=_aware(e.expiry_time) if e.expires else None,
-                in_recycle_bin=bin_uuid is not None and _in_bin(e.group, bin_uuid),
-            )
-        )
+        out.append(EntryRecord(
+            title=e.title, group=e.group_path, username=e.username, url=e.url, tags=list(e.tags),
+            totp_style=_totp_style_of(e), custom_fields=sorted(e.fields), attachments=len(e.attachments),
+            notes_length=len(e.notes), password_length=len(e.password), created=e.ctime, modified=e.mtime,
+            accessed=e.atime, expires=e.expiry if e.expires else None, in_recycle_bin=e.in_bin))
     return sorted(out, key=lambda r: (r.group, r.title))
 
 
-def detail(kp: PyKeePass, title: str, show_password: bool) -> EntryDetail | None:
-    e = kp.find_entries(title=title, first=True)
+def detail(source, title: str, show_password: bool) -> EntryDetail | None:
+    from .vault import as_vault
+
+    e = next((x for x in as_vault(source).entries() if x.title == title), None)
     if e is None:
         return None
     return EntryDetail(
-        title=e.title or "",
-        group=_gpath(e.group),
-        username=e.username or "",
-        url=e.url or "",
-        password=(e.password or "") if show_password else "********",
-        notes=e.notes or "",
-        tags=list(e.tags or []),
-        custom_fields={k: str(v) for k, v in (e.custom_properties or {}).items()},
-    )
+        title=e.title, group=e.group_path, username=e.username, url=e.url,
+        password=e.password if show_password else "********", notes=e.notes, tags=list(e.tags),
+        custom_fields={k: f.value for k, f in e.fields.items()})
 
 
 def _age_bucket(modified: datetime | None, now: datetime) -> str:
@@ -243,15 +255,18 @@ def attachment_bytes(kp: PyKeePass) -> int:
     return sum(len(b) for b in (getattr(kp, "binaries", None) or []))
 
 
-def inventory(kp: PyKeePass, path: Path) -> Inventory:
+def inventory(source, path: Path) -> Inventory:
+    from .vault import as_vault
+
+    vault = as_vault(source)
+    entries, groups, info = vault.entries(), vault.groups(), vault.info()
     now = datetime.now(timezone.utc)
-    recs = records(kp)
-    raw = list(kp.entries)  # same filter, for password-based metrics only
+    recs = records(vault)
 
     # password metrics: values stay in memory, only counts leave
-    pw_counts = Counter(e.password for e in raw if e.password)
+    pw_counts = Counter(e.password for e in entries if e.password)
     reused = [n for n in pw_counts.values() if n > 1]
-    pw_eq_user = sum(1 for e in raw if e.password and e.password == e.username)
+    pw_eq_user = sum(1 for e in entries if e.password and e.password == e.username)
 
     title_counts = Counter(r.title for r in recs if r.title)
     uu_counts = Counter((r.url, r.username) for r in recs if r.url and r.username)
@@ -276,7 +291,7 @@ def inventory(kp: PyKeePass, path: Path) -> Inventory:
         with_notes=sum(1 for r in recs if r.notes_length),
         with_attachments=sum(1 for r in recs if r.attachments),
         attachment_count=sum(r.attachments for r in recs),
-        attachment_bytes=attachment_bytes(kp),
+        attachment_bytes=sum(size for e in entries for _name, size in e.attachments),
         custom_field_names=dict(custom),
     )
 
@@ -284,22 +299,18 @@ def inventory(kp: PyKeePass, path: Path) -> Inventory:
         1 for r in recs if r.created and r.modified and abs((r.modified - r.created).total_seconds()) < 2
     )
 
-    groups = list(kp.groups)
-    names = Counter(g.name for g in groups if g.name and g.uuid != kp.root_group.uuid)
+    held = Counter(e.group_id for e in entries)
+    parents = Counter(g.parent_id for g in groups if g.parent_id)
+    names = Counter(g.name for g in groups if g.name and not g.is_root)
     structure = StructureStats(
-        max_depth=max((len(g.path) if isinstance(g.path, (list, tuple)) else 0 for g in groups), default=0),
-        empty_groups=sum(1 for g in groups if not g.entries and not g.subgroups),
+        max_depth=max((0 if g.is_root else len(g.path.split("/")) for g in groups), default=0),
+        empty_groups=sum(1 for g in groups if not held[g.id] and not parents[g.id]),
         groups_with_slash_in_name=sorted(g.name for g in groups if g.name and "/" in g.name),
         repeated_group_names={n: c for n, c in names.items() if c > 1},
     )
 
-    meta = DbMeta(
-        path=str(path),
-        size_bytes=os.path.getsize(path),
-        version=".".join(map(str, getattr(kp, "version", ()) or ())) or "?",
-        cipher=str(getattr(kp, "encryption_algorithm", "?")),
-        kdf=kdf_name(kp),
-    )
+    meta = DbMeta(path=str(path), size_bytes=os.path.getsize(path), version=info.format.removeprefix("KDBX ") or "?",
+                  cipher=info.cipher or "?", kdf=info.kdf or "?")
 
     return Inventory(
         meta=meta,
@@ -324,5 +335,7 @@ def inventory(kp: PyKeePass, path: Path) -> Inventory:
             password_equals_username=pw_eq_user,
         ),
         structure=structure,
-        history=history_totals(raw),
+        history=HistoryStats(snapshots=sum(e.history_count for e in entries),
+                             entries_with_history=sum(1 for e in entries if e.history_count),
+                             bytes=sum(e.history_bytes for e in entries)),
     )

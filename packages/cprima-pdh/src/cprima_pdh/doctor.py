@@ -121,12 +121,15 @@ def diagnose(db: Path | None, taxonomy: Callable[[], object], taxonomy_source: s
 
     # --- setup
     r.add("setup", "pdh", "ok", f"{__version__} (cprima-pdh), Python {platform.python_version()}")
+    from .source import file_kind
+
+    kind = file_kind(db) if db is not None and db.is_file() else "kdbx"  # the backend follows the file
     try:
-        backends.load("kdbx")
-        r.add("setup", "backend", "ok", "kdbx ready")
+        backends.load(kind)
+        r.add("setup", "backend", "ok", f"{kind} ready")
         kdbx_ready = True
     except backends.BackendMissing as exc:
-        r.add("setup", "backend", "fail", "kdbx not installed", str(exc).split("install it with: ")[-1])
+        r.add("setup", "backend", "fail", f"{kind} not installed", str(exc).split("install it with: ")[-1])
         kdbx_ready = False
     sset = None
     try:
@@ -151,7 +154,10 @@ def diagnose(db: Path | None, taxonomy: Callable[[], object], taxonomy_source: s
     side = sidecar(db)
     left = session.seconds_left()
     unlocked_here = side is not None or (left > 0 and session.load_session(db) is not None)
-    if side is not None:
+    if kind == "sops":
+        unlocked_here = True  # no password and no session: an age identity opens it, or nothing does
+        r.add("setup", "session", "ok", "not needed: an age identity opens it (--key, SOPS_AGE_KEY_FILE or the default key file)")
+    elif side is not None:
         r.add("setup", "session", "ok", f"not needed: password from sidecar {side.name} (test fixture)")
     elif not left:
         r.add("setup", "session", "warn", "locked", "pdh session unlock (then contents and method are shown too)")
@@ -165,13 +171,17 @@ def diagnose(db: Path | None, taxonomy: Callable[[], object], taxonomy_source: s
     if not db.is_file():
         r.add("file", "vault", "fail", f"{db} does not exist", "check --db / KDBX_FILE")
         return r.done()
+    st = db.stat()
+    changed = datetime.fromtimestamp(st.st_mtime).strftime("%Y-%m-%d %H:%M")
+    if kind == "sops":
+        r.add("file", "vault", "ok", f"{db} ({_size(st.st_size)}, changed {changed})")
+        r.add("file", "in use", "ok", "a plain file: no lock; concurrent edits conflict in git")
+        return _sops_rest(r, db, sset, open_unlocked)
     try:
         h = kdbx_header(db)
     except (ValueError, OSError) as exc:
         r.add("file", "vault", "fail", f"{db}: {exc}")
         return r.done()
-    st = db.stat()
-    changed = datetime.fromtimestamp(st.st_mtime).strftime("%Y-%m-%d %H:%M")
     r.add("file", "vault", "ok", f"{db} ({_size(st.st_size)}, changed {changed})")
     kdf, weak = _kdf_text(h)
     r.add("file", "format", "warn" if weak else "ok",
@@ -201,61 +211,80 @@ def diagnose(db: Path | None, taxonomy: Callable[[], object], taxonomy_source: s
         r.add("file", "contents", "skip", "session not usable for this vault")
         return r.done()
 
-    live = _file_contents(r, kp)
+    from .vault import as_vault
+
+    vault = as_vault(kp)
+    live = _file_contents(r, vault)
     if sset is None:
         r.add("method", "progress", "skip", "needs a valid taxonomy")
     else:
-        _method(r, kp, sset, live)
+        _method(r, vault, sset, live)
+    return r.done()
+
+
+def _sops_rest(r: _Report, db: Path, sset, open_unlocked) -> DoctorReport:
+    """The file and method sections of a sops file: the format from the backend, then the same checks as for any vault."""
+    try:
+        vault = open_unlocked(db)
+    except Exception as exc:  # no identity, not a recipient, a bad MAC: say which
+        r.add("file", "format", "fail", f"could not open: {exc}", "pass --key FILE or set SOPS_AGE_KEY_FILE; the file may be altered")
+        r.add("file", "contents", "skip", "needs the age identity")
+        r.add("method", "progress", "skip", "needs the age identity")
+        return r.done()
+    info = vault.info()
+    r.add("file", "format", "ok", f"{info.format} · {info.cipher} · age, {info.extra.get('recipients', '?')} recipient(s) · "
+                                  f"MAC {info.extra.get('mac', '?')}")
+    live = _file_contents(r, vault)
+    unmapped = info.extra.get("unmapped values", "0")
+    if unmapped != "0":
+        r.add("file", "mapping", "warn", f"{unmapped} value(s) are not part of any entry (a scalar beside groups)",
+              "sops files map as groups of entries: a mapping of scalars is an entry")
+    if sset is None:
+        r.add("method", "progress", "skip", "needs a valid taxonomy")
+    else:
+        _method(r, vault, sset, live)
     return r.done()
 
 
 # --- file: contents ------------------------------------------------------------------------------
 
-def _live_entries(kp) -> tuple[list, object | None]:
-    from .source import _in_bin
-
-    rb = kp.recyclebin_group
-    bin_uuid = rb.uuid if rb is not None else None
-    return [e for e in kp.entries if bin_uuid is None or not _in_bin(e.group, bin_uuid)], rb
-
-
-def _file_contents(r: _Report, kp) -> list:
-    from .source import _in_bin, attachment_bytes, history_totals
-
-    live, rb = _live_entries(kp)
-    bin_uuid = rb.uuid if rb is not None else None
-    groups = [g for g in kp.groups if g is not kp.root_group and not (bin_uuid and _in_bin(g, bin_uuid))]
-    empty = sum(1 for g in groups if not g.entries and not g.subgroups)
-    at_root = sum(1 for e in live if e.group.uuid == kp.root_group.uuid)
-    generator = kp.kdbx.body.payload.xml.findtext("Meta/Generator") or "unknown"
-    r.add("file", "contents", "ok", f"{len(live)} entr{'y' if len(live) == 1 else 'ies'} in {len(groups)} "
-                                    f"group{'' if len(groups) == 1 else 's'} ({empty} empty), "
+def _file_contents(r: _Report, vault) -> list:
+    """The file's facts from the backend's snapshots; what a backend cannot hold (a bin, history, attachments) is not shown."""
+    entries, groups = vault.entries(), vault.groups()
+    caps = vault.capabilities
+    live = [e for e in entries if not e.in_bin]
+    shown = [g for g in groups if not g.is_root and not g.is_bin and not g.in_bin]
+    held = Counter(e.group_id for e in entries)
+    kids = Counter(g.parent_id for g in groups if g.parent_id)
+    empty = sum(1 for g in shown if not held[g.id] and not kids[g.id])
+    at_root = sum(1 for e in live if e.group_path == "/")
+    generator = vault.info().generator or "unknown"
+    r.add("file", "contents", "ok", f"{len(live)} entr{'y' if len(live) == 1 else 'ies'} in {len(shown)} "
+                                    f"group{'' if len(shown) == 1 else 's'} ({empty} empty), "
                                     f"{at_root} at the root; written by {generator}")
 
-    if rb is None:
-        r.add("file", "recycle bin", "ok", "off")
-    else:
-        r.add("file", "recycle bin", "ok", f"on, {sum(1 for e in kp.entries if _in_bin(e.group, bin_uuid))} entries")
+    if "recycle_bin" in caps:
+        if any(g.is_bin for g in groups):
+            r.add("file", "recycle bin", "ok", f"on, {sum(1 for e in entries if e.in_bin)} entries")
+        else:
+            r.add("file", "recycle bin", "ok", "off")
+    if "history" in caps:
+        r.add("file", "history", "ok", f"{sum(e.history_count for e in live)} older versions, "
+                                       f"{_size(sum(e.history_bytes for e in live))}")
+    if "attachments" in caps:
+        files = [a for e in entries for a in e.attachments]
+        r.add("file", "attachments", "ok", f"{len(files)} files, {_size(sum(size for _n, size in files))}")
 
-    hist = history_totals(live)
-    binaries = list(getattr(kp, "binaries", None) or [])
-    r.add("file", "history", "ok", f"{hist.snapshots} older versions, {_size(hist.bytes)}")
-    r.add("file", "attachments", "ok", f"{len(binaries)} files, {_size(attachment_bytes(kp))}")
-
-    now = datetime.now(timezone.utc)
-    soon = now + timedelta(days=30)
-
-    def when(e):
-        t = e.expiry_time
-        return t.replace(tzinfo=timezone.utc) if t is not None and t.tzinfo is None else t
-
-    expiring = [e for e in live if e.expires and when(e) is not None]
-    expired = sum(1 for e in expiring if when(e) <= now)
-    due = sum(1 for e in expiring if now < when(e) <= soon)
-    r.add("file", "expiry", "warn" if expired else "ok",
-          f"{len(expiring)} with an expiry date: {expired} expired, {due} within 30 days",
-          "renew or retire the expired records" if expired else "")
-    totp = sum(1 for e in live if e.otp or any(k.startswith(OTP_PREFIXES) for k in (e.custom_properties or {})))
+    if "expiry" in caps:
+        now = datetime.now(timezone.utc)
+        soon = now + timedelta(days=30)
+        expiring = [e for e in live if e.expires and e.expiry is not None]
+        expired = sum(1 for e in expiring if e.expiry <= now)
+        due = sum(1 for e in expiring if now < e.expiry <= soon)
+        r.add("file", "expiry", "warn" if expired else "ok",
+              f"{len(expiring)} with an expiry date: {expired} expired, {due} within 30 days",
+              "renew or retire the expired records" if expired else "")
+    totp = sum(1 for e in live if e.otp or any(k.startswith(OTP_PREFIXES) for k in e.fields))
     r.add("file", "totp", "ok", f"{totp} entries with TOTP")
     return live
 
@@ -266,13 +295,15 @@ def _pct(n: int, total: int) -> str:
     return f"{n} of {total} ({round(100 * n / total) if total else 0} %)"
 
 
-def _method(r: _Report, kp, sset, live: list) -> None:
+def _method(r: _Report, vault, sset, live: list) -> None:
+    from .backends.memory import MemoryVault
     from .conform import conformance
-    from .schema import links_report, lookup_term, typing_of, vocabulary_index, validate
-    from .source import _gpath
+    from .schema import lookup_term, validate, vocabulary_index
+    from .validation import links_for, typing_of
 
+    snap = MemoryVault(vault.entries(), vault.groups())  # one snapshot for all the checks below
     total = len(live)
-    paths = [_gpath(e.group) for e in live]
+    paths = [e.group_path for e in live]
 
     # owners: the top-level groups
     owners = Counter(p.split("/")[0] for p in paths if p != "/")
@@ -290,7 +321,7 @@ def _method(r: _Report, kp, sset, live: list) -> None:
     unknown_names: set[str] = set()
     typed = field_only = 0
     for e in live:
-        t = typing_of(e, sset)  # `_schema` and/or the profile's field-based match rules
+        t = typing_of(e, sset)  # the binding field and/or the profile's field-based match rules
         typed += bool(t.names)
         field_only += bool(t.by_fields and not t.explicit)
         per_schema.update(t.names)
@@ -304,14 +335,13 @@ def _method(r: _Report, kp, sset, live: list) -> None:
 
     # vocabulary: distinct custom field names
     exact, matchers = vocabulary_index(sset.fields)
-    names = {k for e in live for k in (e.custom_properties or {})
-             if k != sset.binding.field and not k.startswith(OTP_PREFIXES)}
+    names = {k for e in live for k in e.fields if k != sset.binding.field and not k.startswith(OTP_PREFIXES)}
     kinds = Counter()
     for k in names:
         hit = lookup_term(k, exact, matchers)
         kinds["term" if hit and hit[2] and hit[0] == k else "alias" if hit and hit[2] else
               "pattern" if hit else "unsupported"] += 1
-    report = validate(kp, sset)
+    report = validate(snap, sset)
     unprotected = sum(1 for f in report.findings if f.rule.startswith("protected:"))
     r.add("method", "vocabulary", "warn" if kinds["unsupported"] or unprotected else "ok",
           f"{len(names)} field names: {kinds['term']} terms, {kinds['pattern']} caught by a name pattern, "
@@ -319,7 +349,7 @@ def _method(r: _Report, kp, sset, live: list) -> None:
           "pdh check conform  (action decide-field / protect-field)" if kinds["unsupported"] or unprotected else "")
 
     # conformance and levels
-    rep = conformance(kp, sset, status="nonconform")
+    rep = conformance(snap, sset, status="nonconform")
     levels = Counter(f.level for f in report.findings)
     lv = ", ".join(f"{levels[x]} {x}" for x in ("ERROR", "WARN", "INFO") if levels[x]) or "no findings"
     r.add("method", "conformance", "warn" if levels["ERROR"] else "ok",
@@ -329,13 +359,13 @@ def _method(r: _Report, kp, sset, live: list) -> None:
     # hygiene: counts only, never values
     # a login is an entry with a user name or a URL; cards, contracts and memberships have no password by design
     no_password = sum(1 for e in live if (e.username or e.url) and not e.password)
-    http = sum(1 for e in live if (e.url or "").lower().startswith("http://"))
-    dupes = sum(1 for n in Counter((p, e.title) for p, e in zip(paths, live)).values() if n > 1)
+    http = sum(1 for e in live if e.url.lower().startswith("http://"))
+    dupes = sum(1 for n in Counter((e.group_path, e.title) for e in live).values() if n > 1)
     r.add("method", "hygiene", "ok", f"{no_password} login{'' if no_password == 1 else 's'} without a password, "
                                      f"{http} http:// URLs (valid; a hint), {dupes} duplicate titles in a group")
 
     # relations
-    links = links_report(kp, sset).links
+    links = links_for(snap.entries(), sset).links
     broken = sum(1 for lk in links if lk.status in ("invalid", "dangling", "self"))
     r.add("method", "relations", "warn" if broken else "ok",
           f"{len(links)} link{'' if len(links) == 1 else 's'}, {broken} broken",
