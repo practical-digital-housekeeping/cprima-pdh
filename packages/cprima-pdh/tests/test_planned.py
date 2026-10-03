@@ -2,6 +2,8 @@
 
 When a command is implemented, remove it from PLANNED, drop the marker from its help, and give it real tests.
 """
+import re
+
 import pytest
 import typer
 from typer.testing import CliRunner
@@ -44,7 +46,8 @@ def test_a_planned_command_exits_3_and_never_opens_a_vault_or_a_port(words, monk
 @pytest.mark.parametrize("words", sorted(PLANNED), ids=[" ".join(w) for w in sorted(PLANNED)])
 def test_a_planned_command_documents_itself_and_has_a_format_option(words):
     result = CliRunner().invoke(app, [*words, "--help"])
-    assert result.exit_code == 0 and "(planned)" in result.stdout and "--format" in result.stdout
+    text = re.sub(r"\[[0-9;]*m", "", result.stdout)  # a CI runner colours the help; the words must still be there
+    assert result.exit_code == 0 and "(planned)" in text and "--format" in text
 
 
 def test_serve_only_accepts_the_options_of_its_contract():
