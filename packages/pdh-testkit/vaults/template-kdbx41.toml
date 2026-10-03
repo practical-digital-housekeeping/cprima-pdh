@@ -1,0 +1,6 @@
+# Sidecar of template-kdbx41.kdbx: a genuine vault made by hand in a real client.
+# Throwaway test password; never use it for anything real.
+password = "test123"
+client = "KeePassXC"
+format = "KDBX 4.1"
+description = "Groups A and B, one entry x moved from A to B (so the file records PreviousParentGroup and KeePassXC wrote KDBX 4.1). Copy it, never edit it."

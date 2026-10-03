@@ -1,0 +1,6 @@
+# Sidecar of template-kdbx4-aeskdf.kdbx: a genuine, empty vault made by hand in a real client.
+# Throwaway test password; never use it for anything real.
+password = "test123"
+client = "KeePassXC"
+format = "KDBX 4.0"
+description = "Empty template (Root group only): AES-KDF key derivation (KDBX 4), AES-256 cipher. Copy it, never edit it."
