@@ -1,0 +1,7 @@
+# Sidecar of sops-json-basic.json: a sops 3.13 JSON file encrypted to two age recipients, made with the real sops binary.
+# Throwaway test identity of the FIRST recipient, base64 of an age identity file; never use it for anything real.
+identity_b64 = "IyBjcmVhdGVkOiAyMDI2LTEwLTAzVDE0OjMwOjM2KzAyOjAwCiMgcHVibGljIGtleTogYWdlMWtxNm1mZ2Y5eTA5bmN5YzB5Znhmd3Y3bHB2Y2Vqcno1YzU2ZGRwbjR2ZXdwNzlweTdka3FzYzQ5dWMKQUdFLVNFQ1JFVC1LRVktMVUyRTBHREFKODZLSFgyWVJKTlQ5Sk1BWVFQNE42OUtZWUZLQzlSWlpZOEhKUUVNNzNaNVFUM1c2UjQK"
+client = "sops 3.13.3"
+format = "sops json"
+plain = "sops-json-basic.plain.json"
+description = "Groups, entries with encrypted and unencrypted (_unencrypted suffix) values, a list, a stray scalar. Two recipients: the second has no identity here."

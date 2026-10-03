@@ -1,0 +1,39 @@
+{
+  "Money": {
+    "Cards": {
+      "login": {
+        "UserName": "alex",
+        "Password": "pw-1",
+        "URL": "https://example.org",
+        "Notes": "n",
+        "Tags": ["a", "b"],
+        "customer_no": "C-1",
+        "token": "t",
+        "visible_unencrypted": "public"
+      }
+    },
+    "plain": {
+      "customer_no": "C-2"
+    }
+  },
+  "Other": {
+    "twin": {
+      "UserName": "u2",
+      "Password": "y"
+    }
+  },
+  "top": {
+    "UserName": "u",
+    "Password": "p"
+  },
+  "stray": "a scalar next to groups",
+  "Archive": {
+    "Old": {
+      "Deep": {
+        "entry": {
+          "UserName": "d"
+        }
+      }
+    }
+  }
+}
