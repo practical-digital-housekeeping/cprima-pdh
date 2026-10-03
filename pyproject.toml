@@ -11,3 +11,5 @@ pdh-testkit = { workspace = true }
 
 [tool.pytest.ini_options]
 testpaths = ["packages/cprima-pdh/tests", "packages/pdh-testkit/tests"]
+addopts = "-m 'not slow'"
+markers = ["slow: opens genuine vaults with their real key derivation (minutes); run with `just test-genuine`"]

@@ -11,6 +11,10 @@ default:
 test:
     uv run --all-packages --all-extras pytest -q
 
+# the write commands on the genuine KDBX 3.1 / 4.0 templates (real key derivation: about 15 minutes)
+test-genuine:
+    uv run --all-packages --all-extras pytest -q -m slow
+
 # build the cprima-pdh sdist and wheel into packages/cprima-pdh/dist
 build:
     uv build --package cprima-pdh --out-dir packages/cprima-pdh/dist
