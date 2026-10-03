@@ -46,10 +46,22 @@ Then, per group of commands: run it, open the file in the client, look for the r
 
 Record what differs (client, version, command, what you saw) in `docs/ideas-and-backlog.md` section 2c.
 
-## Please add
+## Please add: a KDBX 4.1 template
 
-A **KDBX 4.1** template made by hand in KeePassXC 2.7 or later (save the database with "KDBX 4.1" via
-*Database settings, Security*, or create a group move so the file gets `PreviousParentGroup`). Put it into
-`packages/pdh-testkit/vaults/` as `template-kdbx41.kdbx` with a sidecar `.toml` like the other two; the
-parametrised genuine-template tests pick it up. Until then pdh writes `PreviousParentGroup` (so `restore` needs no
-`--to`) only for vaults that already report KDBX 4.1, and this is tested with a faked version, not a real file.
+KeePassXC does not offer a choice between KDBX 4.0 and 4.1: it writes 4.1 on its own as soon as the file uses a 4.1
+feature, for example the record of where an entry was moved from (`PreviousParentGroup`). So make it like this, with
+throwaway content only (never a copy of a real vault):
+
+1. KeePassXC > Database > New Database, format KDBX 4, password `test123`, save as `template-kdbx41.kdbx`.
+2. Create two groups `A` and `B`, an entry `x` in `A`, then drag `x` into `B` (or delete it into the recycle bin and
+   restore it). Delete nothing else. Save and close.
+3. Check the format: `pdh doctor` with `KDBX_FILE` set to the file must say `KDBX 4.1`. If it still says 4.0, do one
+   more move.
+4. Empty it again (delete `x`, empty the recycle bin) if you want an empty template, keep the groups out of it if you
+   prefer a bare one, and save.
+5. Put the file into `packages/pdh-testkit/vaults/` with a sidecar `template-kdbx41.toml`:
+   `password = "test123"`, `client = "KeePassXC"`, `format = "KDBX 4.1"`, `description = "..."`.
+
+The parametrised genuine-template and client tests pick it up by name (`template-*`). Until then pdh writes
+`PreviousParentGroup` (so `restore` needs no `--to`) only for vaults that already report KDBX 4.1, and that is tested
+with a faked version, not a real file.
