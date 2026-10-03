@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Callable
 if TYPE_CHECKING:  # pykeepass is the optional `kdbx` extra
     from pykeepass import PyKeePass
 
-from .backends.kdbx import OTP_STYLES
+from .backends.kdbx import OTP_STYLES, kdf_name
 from .models import (
     DbMeta,
     DuplicateStats,
@@ -298,7 +298,7 @@ def inventory(kp: PyKeePass, path: Path) -> Inventory:
         size_bytes=os.path.getsize(path),
         version=".".join(map(str, getattr(kp, "version", ()) or ())) or "?",
         cipher=str(getattr(kp, "encryption_algorithm", "?")),
-        kdf=str(getattr(kp, "kdf_algorithm", "?")),
+        kdf=kdf_name(kp),
     )
 
     return Inventory(

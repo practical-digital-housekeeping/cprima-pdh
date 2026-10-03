@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable
 
+from .backends.kdbx import kdf_name
 from .entries import _root
 from .models import DbBin, DbKdf, DbSettings, OrgChange
 from .source import _in_bin, pykeepass_open
@@ -148,7 +149,7 @@ def _kdf_params(kp: PyKeePass):
 
 
 def _read_kdf(kp: PyKeePass) -> dict[str, object]:
-    algo = kp.kdf_algorithm
+    algo = kdf_name(kp)
     if not algo.startswith("argon2"):
         return {"algorithm": algo, "iterations": None, "memory_kib": None, "parallelism": None}
     p = _kdf_params(kp)

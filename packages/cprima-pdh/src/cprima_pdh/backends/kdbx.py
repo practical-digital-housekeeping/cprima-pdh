@@ -32,6 +32,20 @@ def plugin_otp(custom: dict[str, str]) -> dict | None:
             "period": int(custom.get("TimeOtp-Period", "30") or 30), "algorithm": algorithm}
 
 
+# the key derivation functions a KDBX file can name (the UUID in its KDF parameters)
+KDF_UUIDS = {"ef636ddf8c29444b91f7a9a403e30a0c": "argon2d", "9e298b1956db4773b23dfc3ec6f0a1e6": "argon2id",
+             "c9d9f39a628a4460bf740d08c18a4fea": "aeskdf"}
+
+
+def kdf_name(kp) -> str:
+    """The key derivation of an opened vault, from its parameters (pykeepass reports nothing for Argon2id)."""
+    try:
+        uuid = bytes(kp.kdbx.header.value.dynamic_header.kdf_parameters.data.dict["$UUID"].value).hex()
+    except (AttributeError, KeyError):  # KDBX 3.x has no KDF parameters: AES-KDF
+        return kp.kdf_algorithm or "unknown"
+    return KDF_UUIDS.get(uuid, kp.kdf_algorithm or "unknown")
+
+
 # how each field kind of the profile is represented in a KDBX entry
 KIND_STORAGE = {
     "text": "custom string field",

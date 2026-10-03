@@ -155,3 +155,24 @@ def test_empty_bin_on_an_empty_or_missing_bin_is_a_noop(tmp_path):
     plain = synthetic_vault(tmp_path / "p.kdbx", [Entry("a", group="G")])
     before = plain.read_bytes()
     assert data(plain, "db", "empty-bin", "--apply")["entries"] == 0 and plain.read_bytes() == before
+
+
+# --- a vault written by a real client with Argon2id (KDBX 4.1): pykeepass cannot name that key derivation ---------------
+
+def test_kdf_names_the_derivation_of_a_real_clients_kdbx41_vault(tmp_path, monkeypatch):
+    import shutil
+
+    from pdh_testkit import vaults
+
+    t = vaults.load("template-kdbx41")
+    db = tmp_path / "w.kdbx"
+    shutil.copyfile(t.path, db)
+    monkeypatch.setattr(_common, "open_db", lambda path, _key: pykeepass_open(path, t.password, None))
+    shown = json.loads(CliRunner().invoke(app, ["--db", str(db), "db", "kdf", "-f", "json"]).stdout)
+    assert shown["algorithm"] in ("argon2d", "argon2id") and shown["iterations"] >= 1 and shown["memory_kib"] >= 1024
+
+
+def test_the_kdf_is_named_from_its_parameters_not_from_the_library(vault):
+    from cprima_pdh.backends.kdbx import kdf_name
+
+    assert kdf_name(pykeepass_open(vault, DEFAULT_PASSWORD, None)) == "argon2d"  # what pykeepass writes

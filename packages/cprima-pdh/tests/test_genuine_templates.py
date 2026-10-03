@@ -128,7 +128,11 @@ def test_delete_restore_purge_and_groups(ctx):
     ctx.run("edit", "delete", "Money/a", "--apply")
     kp = ctx.kp()
     assert kp.recyclebin_group is not None and ctx.entry("a").group.uuid == kp.recyclebin_group.uuid
-    ctx.run("edit", "restore", "Recycle Bin/a", "--to", "Money", "--apply")
+    if ctx.format == "KDBX 4.1":  # the format records where it came from: no --to needed
+        ctx.run("edit", "restore", "Recycle Bin/a", "--apply")
+    else:
+        ctx.run("edit", "restore", "Recycle Bin/a", "--to", "Money", "--apply")
+        ctx.run("edit", "restore", "Recycle Bin/a", "--apply", expect=2)  # (already restored: refused, not a crash)
     assert ctx.entry("a").group.name == "Money"
     ctx.run("edit", "delete", "Money/a", "--apply")
     ctx.run("edit", "purge", "Recycle Bin/a", "--apply")
