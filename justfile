@@ -11,6 +11,10 @@ default:
 test:
     uv run --all-packages --all-extras pytest -q
 
+# vaults written by pdh, read back by KeePassXC itself (keepassxc-cli as a read-only checker; skipped if not installed)
+test-client:
+    uv run --all-packages --all-extras pytest -q -m client
+
 # the write commands on the genuine KDBX 3.1 / 4.0 templates (real key derivation: about 15 minutes)
 test-genuine:
     uv run --all-packages --all-extras pytest -q -m slow

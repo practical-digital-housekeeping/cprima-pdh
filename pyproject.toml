@@ -11,5 +11,8 @@ pdh-testkit = { workspace = true }
 
 [tool.pytest.ini_options]
 testpaths = ["packages/cprima-pdh/tests", "packages/pdh-testkit/tests"]
-addopts = "-m 'not slow'"
-markers = ["slow: opens genuine vaults with their real key derivation (minutes); run with `just test-genuine`"]
+addopts = "-m 'not slow and not client'"
+markers = [
+    "slow: opens genuine vaults with their real key derivation (minutes); run with `just test-genuine`",
+    "client: asks a real client (keepassxc-cli) to read what pdh wrote; run with `just test-client`",
+]
