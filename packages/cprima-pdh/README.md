@@ -37,7 +37,7 @@ Online checks never run without `--online`. `check known-passwords` sends only t
 `--accounts` (an API key in `HIBP_API_KEY`) is the one option that sends e-mail addresses. Level and advice of each
 finding come from the profile (`known-password`, `breach:*`); `--fail-on LEVEL` sets the exit code like `check validate`.
 
-What only a human with the real clients can verify is listed in `docs/manual-e2e.md`.
+What only a human with the real clients can verify is listed in [docs/testing/manual-e2e.md](https://github.com/practical-digital-housekeeping/cprima-pdh/blob/main/docs/testing/manual-e2e.md).
 
 Use `-f json` for machine-readable output.
 

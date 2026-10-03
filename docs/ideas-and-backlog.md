@@ -63,7 +63,7 @@ Since then: every write goes through `txn.execute` (a test enforces it; bulk edi
 the write commands run on the genuine KDBX 3.1 and 4.0 templates (`just test-genuine`, about 15 minutes); breach and
 leaked-password findings take level and advice from the profile; `inspect inventory` reports history and attachment
 totals; `delete` records `PreviousParentGroup` in KDBX 4.1 vaults. Open: a hand-made KDBX 4.1 template and the manual
-checks in `docs/manual-e2e.md` (only a human with KeePassXC and KeePassDX can do them).
+checks in `docs/testing/manual-e2e.md` (only a human with KeePassXC and KeePassDX can do them).
 
 ---
 
