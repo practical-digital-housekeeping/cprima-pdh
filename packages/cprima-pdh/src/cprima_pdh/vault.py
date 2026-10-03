@@ -1,0 +1,152 @@
+"""The Vault interface: what the engine may ask of any store of entries.
+
+The engine (profile checks, tree, doctor, conform, online checks, command logic) talks to a `Vault` and to the immutable
+snapshots it hands out (`EntryData`, `GroupData`), never to a store's own objects. A backend (`backends/kdbx.py` for
+KeePass, `backends/memory.py` for tests, later `backends/sops.py`) implements the interface and keeps every quirk of its
+format to itself. What a backend cannot do is declared in `capabilities`; a command that needs one fails with a clear
+message (`require`) instead of faking it.
+
+Phase 0 of the refactoring: the read side. Write operations follow.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from datetime import datetime
+from typing import Protocol, runtime_checkable
+
+# The standard fields every entry has, by the profile's names (see `[standard.*]`); how a store keeps them is its own business.
+STANDARD = ("Title", "UserName", "Password", "URL", "Notes", "otp")
+
+# What a backend may offer. `fields`, `groups` and `protected` are the read basics every backend has.
+CAPABILITIES = frozenset({
+    "fields", "groups", "protected", "write", "tags", "expiry", "otp", "times", "uuid", "icons", "colours", "autotype",
+    "history", "attachments", "recycle_bin", "credentials", "kdf", "settings", "create",
+})
+
+
+class Unsupported(Exception):
+    """The backend does not offer a capability the command needs."""
+
+
+@dataclass(frozen=True)
+class Field:
+    """A custom field's value and whether the store keeps it protected."""
+
+    value: str
+    protected: bool = False
+
+
+@dataclass(frozen=True)
+class EntryData:
+    """One entry, as the engine sees it. `fields` holds the custom fields only; the standard ones are attributes."""
+
+    id: str
+    group_path: str  # slash-joined names below the root; "/" for an entry directly in the root group
+    title: str = ""
+    username: str = ""
+    password: str = ""
+    url: str = ""
+    notes: str = ""
+    otp: str = ""
+    tags: tuple[str, ...] = ()
+    icon: str = "0"
+    expires: bool = False
+    expiry: datetime | None = None
+    ctime: datetime | None = None
+    mtime: datetime | None = None
+    atime: datetime | None = None
+    in_bin: bool = False
+    fields: dict[str, Field] = field(default_factory=dict)
+    attachments: tuple[tuple[str, int], ...] = ()  # (name, size in bytes); never the content
+    history_count: int = 0
+    history_bytes: int = 0
+    # the standard fields the store keeps protected (KeePass: normally Password and otp, but the file decides)
+    protected_standard: frozenset[str] = frozenset({"Password", "otp"})
+
+    @property
+    def path(self) -> str:
+        """`group/path/title`, as printed by every report and accepted by every command."""
+        return f"{self.group_path}/{self.title}"
+
+    def value(self, name: str) -> str:
+        """The value of a standard field by the profile's name."""
+        return {"Title": self.title, "UserName": self.username, "Password": self.password, "URL": self.url,
+                "Notes": self.notes, "otp": self.otp}[name]
+
+    def is_protected(self, name: str) -> bool:
+        """Whether the store keeps this field protected (a custom field by its own flag, a standard one by the file)."""
+        if name in self.fields:
+            return self.fields[name].protected
+        return name in self.protected_standard
+
+    def names(self) -> list[str]:
+        """The names of everything this entry has a value for: standard fields that are not empty, then custom fields."""
+        return [n for n in STANDARD if self.value(n)] + list(self.fields)
+
+
+@dataclass(frozen=True)
+class GroupData:
+    id: str
+    path: str  # slash-joined; "/" for the root group
+    name: str
+    parent_id: str | None = None
+    notes: str = ""
+    icon: str = "0"
+    in_bin: bool = False  # inside the recycle bin (the bin itself is not)
+    is_root: bool = False
+    is_bin: bool = False
+
+
+@dataclass(frozen=True)
+class VaultInfo:
+    """Facts about the store, for `doctor` and reports. Nothing secret."""
+
+    backend: str
+    format: str = ""
+    cipher: str = ""
+    kdf: str = ""
+    generator: str = ""
+    extra: dict[str, str] = field(default_factory=dict)
+
+
+@runtime_checkable
+class Vault(Protocol):
+    name: str
+    capabilities: frozenset[str]
+
+    def entries(self) -> list[EntryData]: ...
+
+    def groups(self) -> list[GroupData]: ...
+
+    def info(self) -> VaultInfo: ...
+
+    def find_entry(self, path: str, username: str | None = None) -> EntryData: ...
+
+
+def require(vault: Vault, capability: str) -> None:
+    """Raise `Unsupported` unless the backend offers the capability."""
+    if capability not in vault.capabilities:
+        raise Unsupported(f"the {vault.name} backend does not support {capability}")
+
+
+def resolve_entry(entries: list[EntryData], path: str, username: str | None = None) -> EntryData:
+    """The single entry whose `group/path/title` equals `path` (narrowed by user name); `KeyError` for none, `LookupError`
+    for several. Shared by every backend."""
+    hits = [e for e in entries if e.path == path]
+    if username is not None:
+        hits = [e for e in hits if e.username == username]
+    if not hits:
+        raise KeyError(f"no entry at {path!r}" + (f" with username {username!r}" if username else ""))
+    if len(hits) > 1:
+        raise LookupError(f"{len(hits)} entries at {path!r}; narrow it down with a user name or rename one")
+    return hits[0]
+
+
+def as_vault(obj) -> Vault:
+    """A Vault for `obj`: a Vault is returned as is, an opened pykeepass database is wrapped. (A migration aid; goes when
+    nothing hands a raw pykeepass object around any more.)"""
+    if hasattr(obj, "capabilities") and callable(getattr(obj, "entries", None)):
+        return obj
+    from .backends.kdbx import KdbxVault
+
+    return KdbxVault(obj)

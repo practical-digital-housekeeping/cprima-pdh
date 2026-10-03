@@ -70,3 +70,103 @@ class Backend:
     @classmethod
     def missing_dependencies(cls) -> list[str]:
         return [m for m in cls.requires if find_spec(m) is None]
+
+
+# --- the Vault ---------------------------------------------------------------------------------------------------------
+# KdbxVault is the KeePass implementation of the engine's Vault interface (`cprima_pdh.vault`). It wraps an opened pykeepass
+# database and is the only place that is meant to know pykeepass' objects and the KDBX XML. Phase 0 of the refactoring: the
+# read side; the write operations and the workarounds that now live elsewhere move here next.
+
+def _aware(moment):
+    from datetime import timezone
+
+    if moment is not None and moment.tzinfo is None:
+        return moment.replace(tzinfo=timezone.utc)
+    return moment
+
+
+def _group_path(group) -> str:
+    path = group.path
+    if isinstance(path, (list, tuple)):
+        path = "/".join(path)
+    return path or "/"
+
+
+def _below(group, ancestor_uuid) -> bool:
+    while group is not None:
+        if group.uuid == ancestor_uuid:
+            return True
+        group = group.parentgroup
+    return False
+
+
+class KdbxVault:
+    name = "kdbx"
+    capabilities = frozenset({
+        "fields", "groups", "protected", "write", "tags", "expiry", "otp", "times", "uuid", "icons", "colours", "autotype",
+        "history", "attachments", "recycle_bin", "credentials", "kdf", "settings", "create",
+    })
+
+    def __init__(self, kp, path=None):
+        self.kp = kp
+        self.path = path
+
+    def _bin_uuid(self):
+        rb = self.kp.recyclebin_group
+        return rb.uuid if rb is not None else None
+
+    def entries(self):
+        from lxml import etree
+
+        from ..vault import EntryData, Field
+
+        bin_uuid = self._bin_uuid()
+        out = []
+        for e in self.kp.entries:
+            history = list(e.history or [])
+            out.append(EntryData(
+                id=str(e.uuid), group_path=_group_path(e.group), title=e.title or "", username=e.username or "",
+                password=e.password or "", url=e.url or "", notes=e.notes or "", otp=e.otp or "",
+                tags=tuple(e.tags or ()), icon=str(e.icon if e.icon is not None else "0"),
+                expires=bool(e.expires), expiry=_aware(e.expiry_time) if e.expires else None,
+                ctime=_aware(e.ctime), mtime=_aware(e.mtime), atime=_aware(e.atime),
+                in_bin=bin_uuid is not None and _below(e.group, bin_uuid),
+                fields={k: Field(v or "", bool(e.is_custom_property_protected(k)))
+                        for k, v in (e.custom_properties or {}).items()},
+                attachments=tuple((a.filename, len(a.data)) for a in e.attachments),
+                history_count=len(history), history_bytes=sum(len(etree.tostring(h._element)) for h in history),
+                protected_standard=frozenset(
+                    n for n in STANDARD_ATTR
+                    if e._element.xpath("boolean(String[Key=$k]/Value[@Protected='True'])", k=n)),
+            ))
+        return out
+
+    def groups(self):
+        from ..vault import GroupData
+
+        bin_uuid = self._bin_uuid()
+        out = []
+        for g in self.kp.groups:
+            parent = g.parentgroup
+            out.append(GroupData(
+                id=str(g.uuid), path=_group_path(g), name=g.name or "", parent_id=str(parent.uuid) if parent else None,
+                notes=g.notes or "", icon=str(g.icon if g.icon is not None else "0"), is_root=bool(g.is_root_group),
+                is_bin=bin_uuid is not None and g.uuid == bin_uuid,
+                in_bin=bin_uuid is not None and g.uuid != bin_uuid and _below(g, bin_uuid)))
+        return out
+
+    def info(self):
+        from ..vault import VaultInfo
+
+        try:
+            generator = self.kp.kdbx.body.payload.xml.findtext("Meta/Generator") or ""
+        except AttributeError:
+            generator = ""
+        major, minor = self.kp.version
+        return VaultInfo(backend=self.name, format=f"KDBX {major}.{minor}", cipher=str(self.kp.encryption_algorithm),
+                         kdf=kdf_name(self.kp), generator=generator)
+
+    def find_entry(self, path, username=None):
+        from ..vault import resolve_entry
+
+        return resolve_entry(self.entries(), path, username)
