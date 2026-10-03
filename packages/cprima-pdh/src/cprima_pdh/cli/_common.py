@@ -78,12 +78,32 @@ def require_backend(name: str = "kdbx") -> None:
 
 
 def open_db(db: Path, key: Path | None):
-    """Open the vault (session cache first, else prompt). Tests replace this function."""
+    """Open a KDBX vault (session cache first, else prompt). Tests replace this function."""
+    if source.file_kind(db) == "sops":
+        fail("this is a sops file: pdh can read it (inspect, check) but writing sops files is not implemented yet", 2)
     require_backend("kdbx")
     try:
         return source.open_db(db, key, prompt_password)
     except source.OpenError as exc:
         fail(f"open failed: {exc}", 1)
+
+
+def open_vault(db: Path, key: Path | None):
+    """The vault as the engine sees it: a KDBX file through the kdbx backend, a sops file through the sops backend.
+    For a sops file `key` is the age identity file (else SOPS_AGE_KEY / SOPS_AGE_KEY_FILE, as with sops itself)."""
+    from ..vault import as_vault
+
+    if source.file_kind(db) == "sops":
+        require_backend("sops")
+        from ..backends import age
+        from ..backends.sops import SopsVault, default_identities
+        from ..sopsfmt import SopsError
+
+        try:
+            return SopsVault.open(db, age.load_identities(key) if key else default_identities())
+        except (SopsError, age.AgeError, OSError) as exc:
+            fail(f"open failed: {exc}", 1)
+    return as_vault(open_db(db, key))
 
 
 def taxonomy_source(st: AppState) -> str:

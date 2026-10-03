@@ -149,7 +149,8 @@ class SopsVault:
                 text = ", ".join(_text(v) for v in value) if isinstance(value, list) else _text(value)
                 fields[key] = Field(text, encrypted)
         return EntryData(
-            id=str(uuid.uuid5(_NAMESPACE, "entry:" + "/".join(base))), group_path="/".join(group) or "/", title=title,
+            id=str(uuid.uuid5(_NAMESPACE, "entry:" + "/".join(base))), group_path="/".join(group) or "/",
+            group_id=self._gid(group), title=title,
             username=standard.get("UserName", ""), password=standard.get("Password", ""), url=standard.get("URL", ""),
             notes=standard.get("Notes", ""), otp=standard.get("otp", ""), tags=tags, mtime=stamp, atime=stamp,
             fields=fields, protected_standard=frozenset(protected_standard))

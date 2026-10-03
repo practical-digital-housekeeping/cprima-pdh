@@ -29,8 +29,21 @@ def _guarded(action):
 
 
 def _kp(ctx: typer.Context):
+    """The vault of the command (any backend); the engine reads it through its snapshots."""
     st = c.state(ctx)
-    return c.open_db(c.require_db(st), st.key)
+    return c.open_vault(c.require_db(st), st.key)
+
+
+def _kdbx(ctx: typer.Context, capability: str):
+    """The KeePass database behind the vault, for what the engine cannot yet do on snapshots; refuses other backends."""
+    from ..vault import Unsupported, require
+
+    vault = _kp(ctx)
+    try:
+        require(vault, capability)
+    except Unsupported as exc:
+        c.fail(str(exc), 2)
+    return vault.kp
 
 
 @app.command()
@@ -100,8 +113,8 @@ def find(
 
     def match(e) -> bool:
         if in_fields:
-            return any(needle in k.lower() or needle in (v or "").lower() for k, v in (e.custom_properties or {}).items())
-        return any(needle in (v or "").lower() for v in (e.title, e.username, e.url, e.notes))
+            return any(needle in k.lower() or needle in f.value.lower() for k, f in e.fields.items())
+        return any(needle in v.lower() for v in (e.title, e.username, e.url, e.notes))
 
     c.emit(EntryList(entries=source.records(_kp(ctx), match)), fmt)
 
@@ -111,7 +124,7 @@ def history(ctx: typer.Context, path: Annotated[str, typer.Argument(help="Entry 
             fmt: c.Fmt = Format.text,
             username: Annotated[Optional[str], typer.Option("--username", help="Pick among entries sharing the path.")] = None) -> None:
     """The history of an entry: when it changed and which fields, never the values."""
-    c.emit(_guarded(lambda: history_mod.history_report(_kp(ctx), path, username)), fmt)
+    c.emit(_guarded(lambda: history_mod.history_report(_kdbx(ctx, "history"), path, username)), fmt)
 
 
 @app.command("otp")
@@ -120,15 +133,18 @@ def otp_code(ctx: typer.Context, path: Annotated[str, typer.Argument(help="Entry
              username: Annotated[Optional[str], typer.Option("--username", help="Pick among entries sharing the path.")] = None) -> None:
     """The current one-time password of an entry: the code and its remaining seconds, never the secret."""
     from .. import otp as otp_mod
-    from ..write import WriteError, find_entry
+    from ..vault import as_vault
 
-    e = _guarded(lambda: find_entry(_kp(ctx), path, username))
+    try:
+        e = as_vault(_kp(ctx)).find_entry(path, username)
+    except LookupError as exc:  # no such entry, or several: say so
+        c.fail(f"not found: {exc.args[0] if exc.args else exc}", 1)
     params = None
     try:
         if e.otp:
             params = otp_mod.parse(e.otp)
         else:
-            params = otp_mod.from_plugin_fields(dict(e.custom_properties or {}))
+            params = otp_mod.from_plugin_fields({k: f.value for k, f in e.fields.items()})
     except ValueError as exc:
         c.fail(f"{path}: {exc}", 1)
     if params is None:
@@ -141,7 +157,7 @@ def attachments(ctx: typer.Context, path: Annotated[str, typer.Argument(help="En
                 fmt: c.Fmt = Format.text,
                 username: Annotated[Optional[str], typer.Option("--username", help="Pick among entries sharing the path.")] = None) -> None:
     """The attachments of an entry: name and size, never the content."""
-    c.emit(_guarded(lambda: attachments_mod.attachments_report(_kp(ctx), path, username)), fmt)
+    c.emit(_guarded(lambda: attachments_mod.attachments_report(_kdbx(ctx, "attachments"), path, username)), fmt)
 
 
 @app.command()

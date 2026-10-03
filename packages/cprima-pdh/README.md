@@ -44,6 +44,21 @@ What only a human with the real clients can verify is listed in [docs/testing/ma
 
 Use `-f json` for machine-readable output.
 
+## Stores (backends)
+
+| Backend | Reads | Writes | Extra |
+|---|---|---|---|
+| `kdbx` | KeePass KDBX 3.1, 4.0, 4.1 (AES, ChaCha20, Twofish; Argon2d, Argon2id, AES-KDF) | yes, everything in the table above | `cprima-pdh[kdbx]` |
+| `sops` | a [sops](https://github.com/getsops/sops) JSON file encrypted to age recipients | not yet | `cprima-pdh[sops]` |
+
+pdh recognises the kind of file from its content, so `pdh --db secrets.enc.json inspect tree` just works. For a sops file the
+age identity comes from `--key FILE`, else `SOPS_AGE_KEY` / `SOPS_AGE_KEY_FILE`, else sops' default key file. One file is one vault:
+a mapping of mappings is a group, a mapping of scalars is an entry, a leaf is a field. Values sops encrypted are protected
+fields; titles, group names and field names are the file's plaintext keys. The file's MAC is verified first, so an altered or
+reordered file is refused. A sops file has no recycle bin, history, attachments or expiry; commands that need those say so
+(`this backend does not support history`). Every read command, the profile checks and `doctor` run on both stores through the same
+engine. YAML sops files and writing come later.
+
 ## Which vault
 
 `--db PATH`, else `--vault NAME` (or `PDH_VAULT`), else `KDBX_FILE`, else the `default` vault of the config, else the

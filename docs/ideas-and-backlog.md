@@ -67,6 +67,18 @@ checks in `docs/testing/manual-e2e.md` (only a human with KeePassXC and KeePassD
 
 ---
 
+## 2d. Vault interface and the sops+age backend  (IN PROGRESS, 2026-10-03)
+
+The engine reads snapshots (`EntryData`) from a `Vault` (`vault.py`); `backends/kdbx.py`, `backends/memory.py` and `backends/sops.py`
+implement it. Done: the interface and the contract tests; the validator, `read`, `links`, `unclassified`, `conform`, `tree`, `infer`,
+`inventory`, `records`, `doctor` and the online/CSV/otp readers on snapshots (the XPath engine stays as the parity reference
+`*_xpath` until the write side has moved); read-only sops+age for JSON, verified against the real `sops` binary (values, MAC, several
+recipients, `mac_only_encrypted`). Next: the write side onto operations and `txn` (the KDBX workarounds move into `KdbxVault`), a temp-file
+write that replaces the vault only after verification, refusing to write unverified formats, backend choice in the config, sops YAML,
+creating a sops file from a vault (an encrypted backup), and the `pdh sops ...` audit commands for arbitrary sops files.
+
+---
+
 ## 3. Taxonomy and engine  (BACKLOG / OPEN)
 
 - **Relations are implemented:** a field of kind `link` holds another entry's UUID (a KeePass `{REF:T@I:...}`

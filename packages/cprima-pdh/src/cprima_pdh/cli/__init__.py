@@ -87,6 +87,11 @@ def doctor(ctx: typer.Context, fmt: c.Fmt = Format.text) -> None:
     st = c.state(ctx)
 
     def open_unlocked(db: Path):
+        if source_mod.file_kind(db) == "sops":  # an age identity instead of a password; errors reach the report
+            from ..backends import age
+            from ..backends.sops import SopsVault, default_identities
+
+            return SopsVault.open(db, age.load_identities(st.key) if st.key else default_identities())
         # only with a sidecar password or a session: doctor never prompts
         if source_mod.sidecar(db) is None and session_mod.load_session(db) is None:
             return None
