@@ -1,4 +1,4 @@
-"""Reads a KDBX file (via pykeepass) into pdh models. Never saves."""
+"""Reads a vault into pdh models. Never saves."""
 from __future__ import annotations
 
 import base64
@@ -7,12 +7,10 @@ import os
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable
-
-if TYPE_CHECKING:  # pykeepass is the optional `kdbx` extra
-    from pykeepass import PyKeePass
+from typing import Callable
 
 from .backends.kdbx import OTP_STYLES, kdf_name
+from .backends.kdbx_vault import header_end, pykeepass_open, save_vault, stored_header_hash_ok  # (re-exported: the KDBX specifics live in the backend)  # noqa: F401
 from .models import (
     DbMeta,
     DuplicateStats,
@@ -31,69 +29,6 @@ from .session import load_session
 
 class OpenError(Exception):
     pass
-
-
-def pykeepass_open(path: str | Path, password: str | None, keyfile: str | None) -> PyKeePass:
-    """The one place that constructs a PyKeePass; imported here so pykeepass stays optional."""
-    from pykeepass import PyKeePass
-
-    return PyKeePass(str(path), password=password, keyfile=keyfile)
-
-
-# --- saving ---------------------------------------------------------------------------------------------------------
-# A KDBX 3.x file stores a hash of its own file header inside the encrypted body (`Meta/HeaderHash`) and clients refuse a
-# file whose header does not match it. pykeepass rotates the header's seeds on every save and never updates that hash, so
-# every file it saves in KDBX 3.x is unreadable for KeePassXC. KDBX 4.x keeps the header hash outside the body (fine).
-
-def header_end(data: bytes) -> int:
-    """Where the KDBX 3.x file header ends: after the two signatures and the version, a list of (id, size, data) fields
-    up to and including the end-of-header field (id 0)."""
-    pos = 12
-    while True:
-        field_id, size = data[pos], int.from_bytes(data[pos + 1:pos + 3], "little")
-        pos += 3 + size
-        if field_id == 0:
-            return pos
-
-
-def _header_hash(path: Path) -> str:
-    data = Path(path).read_bytes()
-    return base64.b64encode(hashlib.sha256(data[:header_end(data)]).digest()).decode()
-
-
-def _meta_header_hash(kp: PyKeePass):
-    tree = kp.tree
-    return (tree.getroot() if hasattr(tree, "getroot") else tree).find("Meta/HeaderHash")
-
-
-def stored_header_hash_ok(kp: PyKeePass, path: Path) -> bool:
-    """True when `path` (a file just written, `kp` reopened from it) has a header hash that matches its header; always
-    true for KDBX 4.x, which has no such field in the body."""
-    if tuple(kp.version)[0] != 3:
-        return True
-    element = _meta_header_hash(kp)
-    return element is not None and element.text == _header_hash(path)
-
-
-def save_vault(kp: PyKeePass, filename: str | Path | None = None) -> None:
-    """Save like `kp.save`, and keep the header hash of a KDBX 3.x file valid (see above)."""
-    kp.save(filename)
-    if tuple(kp.version)[0] != 3:
-        return
-    element = _meta_header_hash(kp)
-    if element is None:
-        return
-    from pykeepass.kdbx_parsing import KDBX
-
-    target = Path(filename) if filename else Path(kp.filename)
-    element.text = _header_hash(target)  # the header just written; building again below keeps it byte for byte
-    tmp = target.with_suffix(".tmp")
-    try:
-        KDBX.build_file(kp.kdbx, tmp, password=kp.password, keyfile=kp.keyfile, transformed_key=None, decrypt=True)
-        os.replace(tmp, target)
-    except Exception:
-        tmp.unlink(missing_ok=True)
-        raise
 
 
 _KDBX_SIGNATURE = bytes.fromhex("03d9a29a67fb4bb5")
@@ -135,7 +70,7 @@ def sidecar_password(path: Path) -> str | None:
     return tomllib.loads(side.read_text(encoding="utf-8"))["password"] if side else None
 
 
-def open_db(path: Path, key: Path | None, prompt: Callable[[], str | None]) -> PyKeePass:
+def open_db(path: Path, key: Path | None, prompt: Callable[[], str | None]):
     """Open db with, in this order: the password in its sidecar file, the session cache, or prompt()."""
     side_pw = sidecar_password(path)
     sess = None if side_pw is not None else load_session(path)
@@ -240,19 +175,6 @@ def _len_bucket(n: int) -> str:
         if n < limit:
             return name
     return "20+"
-
-
-def history_totals(entries) -> HistoryStats:
-    """Snapshots, how many entries have any, and their size: counts only, no content."""
-    from lxml import etree
-
-    versions = [h for e in entries for h in (e.history or [])]
-    return HistoryStats(snapshots=len(versions), entries_with_history=sum(1 for e in entries if e.history),
-                        bytes=sum(len(etree.tostring(h._element)) for h in versions))
-
-
-def attachment_bytes(kp: PyKeePass) -> int:
-    return sum(len(b) for b in (getattr(kp, "binaries", None) or []))
 
 
 def inventory(source, path: Path) -> Inventory:

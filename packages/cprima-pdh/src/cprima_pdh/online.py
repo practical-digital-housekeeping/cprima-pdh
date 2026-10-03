@@ -12,16 +12,12 @@ import json
 import re
 from datetime import date, datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING
 from urllib.parse import quote, urlparse
 
 from . import net
 from .conform import _issue
 from .models import LEVEL_ORDER, AccountHit, BreachHit, BreachReport, KnownPassword, KnownPasswordsReport, RuleFinding
 from .vault import as_vault
-
-if TYPE_CHECKING:
-    from pykeepass import PyKeePass
 
 RANGE_URL = "https://api.pwnedpasswords.com/range/"
 CATALOGUE_URL = "https://haveibeenpwned.com/api/v3/breaches"
@@ -67,7 +63,7 @@ def _sha1(password: str) -> str:
     return hashlib.sha1(password.encode("utf-8")).hexdigest().upper()  # noqa: S324 - the service's format, not security
 
 
-def _by_hash(kp: PyKeePass) -> dict[str, list[str]]:
+def _by_hash(kp) -> dict[str, list[str]]:
     out: dict[str, list[str]] = {}
     for e in _live(kp):
         if e.password:
@@ -82,7 +78,7 @@ def _report(source: str, hashes: dict[str, list[str]], counts: dict[str, int]) -
                                 exposed=sorted(exposed, key=lambda x: x.entry))
 
 
-def known_passwords_online(kp: PyKeePass) -> KnownPasswordsReport:
+def known_passwords_online(kp) -> KnownPasswordsReport:
     """Ask the range API, once per distinct 5-character prefix."""
     hashes = _by_hash(kp)
     counts: dict[str, int] = {}
@@ -121,7 +117,7 @@ def _lookup(f, size: int, key: bytes) -> int | None:
     return None
 
 
-def known_passwords_file(kp: PyKeePass, file: Path) -> KnownPasswordsReport:
+def known_passwords_file(kp, file: Path) -> KnownPasswordsReport:
     """Look the hashes up in a local sorted SHA-1 list (the Pwned Passwords download); no network."""
     hashes = _by_hash(kp)
     counts: dict[str, int] = {}
@@ -140,7 +136,7 @@ def _host(url: str) -> str:
     return host[4:] if host.startswith("www.") else host
 
 
-def breach_report(kp: PyKeePass, accounts: bool = False, api_key: str = "") -> BreachReport:
+def breach_report(kp, accounts: bool = False, api_key: str = "") -> BreachReport:
     """Compare the entries' sites with the public breach catalogue; optionally look up e-mail addresses."""
     catalogue = json.loads(net.fetch(CATALOGUE_URL).decode("utf-8"))
     with_domain = [(b, b["Domain"].strip().lower()) for b in catalogue if (b.get("Domain") or "").strip()]

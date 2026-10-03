@@ -18,33 +18,24 @@ from collections import Counter
 from functools import lru_cache
 from importlib.resources import files
 from pathlib import Path
-from typing import TYPE_CHECKING, Iterator, Literal, NamedTuple
+from typing import Literal, NamedTuple
 
-from lxml import etree
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
-
-if TYPE_CHECKING:  # pykeepass is the optional `kdbx` extra; it is only needed to open a vault
-    from pykeepass import PyKeePass
 
 from .models import (
     LEVEL_ORDER,
     CompiledRule,
     Level,
-    Link,
     LinksReport,
     ReadReport,
     RuleCount,
-    RuleFinding,
     SchemaRules,
-    SchemaStats,
     SchemaView,
-    TypedEntry,
     UnclassifiedReport,
     ValidationReport,
     ValidationSummary,
 )
-from .backends.kdbx import OTP_PREFIXES, STANDARD_ATTR, STANDARD_PROTECTED
-from .source import _gpath, _in_bin
+from .backends.kdbx import OTP_PREFIXES, STANDARD_ATTR
 
 DEFAULT_PROFILE = "pdh-default"  # the profile whose [level] and [standard] a taxonomy fragment inherits
 SCHEMA_PSEUDO = "schema-field"  # pseudo-schema name for findings about the binding field itself
@@ -521,49 +512,6 @@ def _schema_fields(d: SchemaDef) -> set[str]:
             *(a for alts in d.aliases.values() for a in alts)}
 
 
-def _vocabulary_findings(e, ref: str, exact, matchers, skip: set[tuple[str, str, str]], levels: Levels,
-                         known: set[str] = frozenset(), binding: str = "") -> list[RuleFinding]:
-    """Findings per field; rule ids carry the vocabulary *term*, so summaries stay short.
-
-    `skip` holds (entry, kind, field) triples the entry's schema already reported. `known` are the fields
-    the entry's own schemas name. The taxonomy is dogma: with a vocabulary present, any other custom field
-    name is unsupported and reported once per entry as `unknown-field` (WARN).
-    """
-    out: list[RuleFinding] = []
-    unknown: list[str] = []
-
-    def add(kind: str, term: str, message: str, key: str) -> None:
-        if (ref, kind, key) not in skip:
-            rule = f"{kind}:{term}"
-            out.append(RuleFinding(schema=VOCABULARY, entry=ref, rule=rule, level=levels.of(rule),
-                                   message=message, fields=[key]))
-
-    for key in (e.custom_properties or {}):
-        if key.startswith(OTP_PREFIXES):  # the KeePass 2 OTP plugin's own fields are not user fields
-            continue
-        found = lookup_term(key, exact, matchers)
-        if found is None:
-            if (exact or matchers) and key != binding and key not in known and (ref, "closed", key) not in skip:
-                unknown.append(key)
-            continue
-        name, ft, by_name = found
-        if key != name and key in ft.aliases:
-            add("alias", name, f"rename to {name}", key)
-        protected = bool(e._element.xpath("boolean(String[Key=$k]/Value[@Protected='True'])", k=key))
-        if ft.protected is True and not protected:
-            add("protected", name, f"field {key} should be protected", key)
-        elif ft.protected is False and protected:
-            add("unprotected", name, f"field {key} should not be protected", key)
-        if by_name and ft.pattern:
-            value = e.get_custom_property(key) or ""  # compared in memory, never reported
-            if value and not re.fullmatch(ft.pattern, value):
-                add("pattern", name, f"value does not match type {name}", key)
-    if unknown:
-        out.append(RuleFinding(schema=VOCABULARY, entry=ref, rule="unknown-field", level=levels.of("unknown-field"),
-                               message="field name not in the vocabulary (unsupported)", fields=sorted(unknown)))
-    return out
-
-
 _REF = re.compile(r"^\{REF:[A-Z]@I:([0-9A-F]{32})\}$", re.IGNORECASE)
 _UUID = re.compile(
     r"^(?:[0-9A-F]{32}|[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12})$", re.IGNORECASE
@@ -597,42 +545,6 @@ _LINK_MESSAGES = {
     "wrong-schema": "link target does not have one of the allowed schemas",
     "target-unclassified": "link target has no schema yet",
 }
-
-
-def _resolve_link(e, raw: str, targets: list[str], index: dict) -> tuple[str, str | None]:
-    """(status, target as group/title or None) for one link value. Structure only; never reads what is linked."""
-    key = parse_link(raw)
-    if key is None:
-        return "invalid", None
-    hit = index.get(key)
-    if key == uuid_key(e.uuid):
-        return "self", (f"{hit[1]}/{hit[0].title}" if hit else None)
-    if hit is None:
-        return "dangling", None
-    target, path, names = hit
-    ref = f"{path}/{target.title}"
-    if not names:
-        return "target-unclassified", ref
-    if not set(names) & set(targets):
-        return "wrong-schema", ref
-    return "ok", ref
-
-
-def _link_findings(e, ref: str, names: list[str], flat: dict[str, SchemaDef], index: dict,
-                   levels: Levels) -> list[RuleFinding]:
-    """Findings for the link fields of the schemas an entry names. An absent field is a `required` question."""
-    out: list[RuleFinding] = []
-    for n in names:
-        for fld, targets in flat[n].links.items():
-            raw = e.get_custom_property(fld)
-            if not raw or not raw.strip():
-                continue
-            status, _target = _resolve_link(e, raw, targets, index)
-            if status != "ok":
-                rule = f"link:{status}"
-                out.append(RuleFinding(schema=n, entry=ref, rule=rule, level=levels.of(rule),
-                                       message=_LINK_MESSAGES[status], fields=[fld]))
-    return out
 
 
 def parse_schema_names(raw: str | None, known: set[str] | dict) -> tuple[list[str], list[str]]:
@@ -678,145 +590,6 @@ def typing_of(e, sset: SchemaSet) -> Typing:
     return Typing(explicit, by_fields, unknown)
 
 
-def _bind(kp: PyKeePass, sset: SchemaSet) -> Iterator[tuple[object, str, list[str], list[str]]]:
-    """Yield (entry, group path, record types that apply, unknown `_schema` names) for every live entry."""
-    rb = kp.recyclebin_group
-    bin_uuid = rb.uuid if rb is not None else None
-    for e in kp.entries:
-        if bin_uuid is not None and _in_bin(e.group, bin_uuid):
-            continue
-        t = typing_of(e, sset)
-        yield e, _gpath(e.group), t.names, t.unknown
-
-
-def _value(e, key: str) -> str:
-    if key in STANDARD_ATTR:  # a standard field: the KeePass attribute that holds it (the kdbx backend's mapping)
-        return getattr(e, STANDARD_ATTR[key]) or ""
-    return e.get_custom_property(key) or ""
-
-
-def _is_protected(e, key: str, schema_protected: list[str]) -> bool:
-    return (
-        key in STANDARD_PROTECTED
-        or key in schema_protected
-        or bool(e._element.xpath("boolean(String[Key=$k]/Value[@Protected='True'])", k=key))
-    )
-
-
-def _combined_findings(
-    e, ref: str, names: list[str], flat: dict[str, SchemaDef], closed_xp: dict[tuple[str, ...], tuple],
-    sset: SchemaSet,
-) -> list[RuleFinding]:
-    """Findings that only exist when several schemas apply together: `closed` over the union, type conflicts."""
-    label = "+".join(names)
-    out: list[RuleFinding] = []
-    applied = [flat[n] for n in names]
-    if any(d.closed for d in applied):
-        key = tuple(names)
-        if key not in closed_xp:
-            merged = applied[0]
-            for d in applied[1:]:
-                merged = _merge(merged, d)
-            rule = closed_rule(merged, sset)
-            closed_xp[key] = (rule, etree.XPath(rule.xpath))
-        rule, xp = closed_xp[key]
-        hits = [x.findtext("Key") or "" for x in xp(e._element)]
-        if hits:
-            out.append(RuleFinding(schema=label, entry=ref, rule=rule.id, level=rule.level,
-                                   message=rule.message, fields=hits))
-    if len(names) > 1:
-        typed: dict[str, set[str]] = {}
-        for d in applied:
-            for field, t in d.types.items():
-                typed.setdefault(field, set()).add(t)
-        for field, ts in sorted(typed.items()):
-            if len(ts) > 1:
-                out.append(RuleFinding(schema=label, entry=ref, rule="schema:type-conflict",
-                                       level=sset.levels.of("schema:type-conflict"),
-                                       message=f"schemas type this field differently ({', '.join(sorted(ts))})",
-                                       fields=[field]))
-    return out
-
-
-def validate_xpath(kp: PyKeePass, sset: SchemaSet) -> ValidationReport:
-    flat = {n: resolve(d, sset.facets) for n, d in sset.schemas.items()}
-    xpaths = {
-        n: [(r, etree.XPath(r.xpath)) for r in compile_rules(d, sset, include_closed=False)]
-        for n, d in flat.items()
-    }
-    patterns = {n: pattern_checks(d, sset.fields) for n, d in flat.items()}
-    levels = sset.levels
-    closed_xp: dict[tuple[str, ...], tuple] = {}
-
-    exact, matchers = vocabulary_index(sset.fields)
-    counts = {n: [0, 0] for n in flat}  # entries naming the schema, conforming
-    vocab = [0, 0]
-    findings: list[RuleFinding] = []
-    unclassified = 0
-    bound = list(_bind(kp, sset))
-    index = {uuid_key(e.uuid): (e, path, names) for e, path, names, _u in bound}  # live entries by UUID
-    for e, path, names, unknown in bound:
-        ref = f"{path}/{e.title}"
-        first = len(findings)
-        for u in unknown:
-            findings.append(RuleFinding(schema=SCHEMA_PSEUDO, entry=ref, rule="schema:unknown",
-                                        level=levels.of("schema:unknown"),
-                                        message=f"unknown schema name in {sset.binding.field}", fields=[u]))
-        if not names:
-            unclassified += 1
-        else:
-            hits = {n: _check_schema(e, ref, n, xpaths, patterns, findings, levels) for n in names}
-            combined = (_combined_findings(e, ref, names, flat, closed_xp, sset)
-                        + _link_findings(e, ref, names, flat, index, levels))
-            findings += combined
-            for n in names:
-                counts[n][0] += 1
-                counts[n][1] += hits[n] == 0 and not combined
-        # the same finding reported by several schemas is listed once
-        deduped, seen_keys = [], set()
-        for f in findings[first:]:
-            key = (f.rule, tuple(f.fields))
-            if key not in seen_keys:
-                seen_keys.add(key)
-                deduped.append(f)
-        findings[first:] = deduped
-        # vocabulary applies to every entry; skip what the entry's schemas already reported
-        seen = {(ref, f.rule.split(":")[0], k) for f in findings[first:] for k in f.fields}
-        known = set().union(*(_schema_fields(flat[n]) for n in names)) if names else set()
-        vf = _vocabulary_findings(e, ref, exact, matchers, seen, levels, known, sset.binding.field)
-        findings += vf
-        vocab[0] += 1
-        vocab[1] += not vf
-
-    findings.sort(key=lambda f: (f.schema_name, f.entry, f.rule))
-    stats = {n: SchemaStats(entries=c[0], conforming=c[1], with_findings=c[0] - c[1]) for n, c in counts.items()}
-    if exact or matchers:
-        stats[VOCABULARY] = SchemaStats(entries=vocab[0], conforming=vocab[1], with_findings=vocab[0] - vocab[1])
-    return ValidationReport(schemas=stats, unclassified_entries=unclassified, findings=findings)
-
-
-def _check_schema(e, ref, name, xpaths, patterns, findings, levels: Levels) -> int:
-    """Run one entry through one schema's XPath rules and value patterns; returns the number of hits."""
-    hits = 0
-    for rule, xp in xpaths[name]:
-        res = xp(e._element)
-        if isinstance(res, bool):
-            hit, fields = res, []
-        else:
-            hit, fields = bool(res), [x.findtext("Key") or "" for x in res]
-        if hit:
-            hits += 1
-            findings.append(RuleFinding(schema=name, entry=ref, rule=rule.id, level=rule.level,
-                                        message=rule.message, fields=fields))
-    for field, type_name, rx in patterns[name]:
-        value = _value(e, field)  # compared in memory, never reported
-        if value and not rx.fullmatch(value):
-            hits += 1
-            findings.append(RuleFinding(schema=name, entry=ref, rule=f"pattern:{field}", level=levels.of("pattern"),
-                                        message=f"value does not match type {type_name}", fields=[field]))
-    return hits
-
-
 def summarize(report: ValidationReport) -> ValidationSummary:
     """Collapse findings to one count per (schema, rule): the number of distinct entries."""
     distinct = {(f.schema_name, f.rule, f.level, f.entry) for f in report.findings}
@@ -837,67 +610,8 @@ def worst_level(report: ValidationReport) -> str | None:
     return max((f.level for f in report.findings), key=lambda lvl: LEVEL_ORDER[lvl], default=None)
 
 
-def read_xpath(kp: PyKeePass, sset: SchemaSet, only: str | None = None) -> ReadReport:
-    """Entries as typed records of their schema's fields; protected values are not read."""
-    flat = {n: resolve(d, sset.facets) for n, d in sset.schemas.items()}
-    out: list[TypedEntry] = []
-    unclassified = 0
-    for e, path, names, _unknown in _bind(kp, sset):
-        if not names:
-            unclassified += 1
-            continue
-        for name in names:  # one typed record per schema the entry names
-            if only and name != only:
-                continue
-            d = flat[name]
-            protected = _effective_protected(d, sset.fields)
-            values: dict[str, str] = {}
-            keys = _union(_union(_union(_union(d.required, d.recommended), d.optional), d.protected), list(d.types))
-            for key in _union(keys, list(d.links)):
-                if _is_protected(e, key, protected):
-                    if _value(e, key):
-                        values[key] = "(protected)"
-                elif v := _value(e, key):
-                    values[key] = v
-            out.append(TypedEntry(schema=name, entry=f"{path}/{e.title}", fields=values))
-    out.sort(key=lambda t: (t.schema_name, t.entry))
-    return ReadReport(entries=out, unclassified_entries=unclassified)
 
-
-def links_report_xpath(kp: PyKeePass, sset: SchemaSet) -> LinksReport:
-    """Every link of every typed entry with its status, and how many links each target receives."""
-    flat = {n: resolve(d, sset.facets) for n, d in sset.schemas.items()}
-    bound = list(_bind(kp, sset))
-    index = {uuid_key(e.uuid): (e, path, names) for e, path, names, _u in bound}
-    seen: dict[tuple[str, str], Link] = {}
-    for e, path, names, _unknown in bound:
-        for n in names:
-            for fld, targets in flat[n].links.items():
-                raw = e.get_custom_property(fld)
-                if not raw or not raw.strip() or (f"{path}/{e.title}", fld) in seen:
-                    continue
-                status, target = _resolve_link(e, raw, targets, index)
-                source = f"{path}/{e.title}"
-                seen[(source, fld)] = Link(source=source, field=fld, target=target, status=status)
-    links = sorted(seen.values(), key=lambda lk: (lk.source, lk.field))
-    per_target = Counter(lk.target for lk in links if lk.target and lk.status != "self")
-    return LinksReport(links=links, per_target=dict(per_target))
-
-
-def unclassified_xpath(kp: PyKeePass, sset: SchemaSet, list_entries: bool = False) -> UnclassifiedReport:
-    """Live entries without a valid `_schema`: the seeding to-do list."""
-    per_group: Counter[str] = Counter()
-    refs: list[str] = []
-    for e, path, names, _unknown in _bind(kp, sset):
-        if names:
-            continue
-        per_group[path] += 1
-        if list_entries:
-            refs.append(f"{path}/{e.title}")
-    return UnclassifiedReport(total=sum(per_group.values()), per_group=dict(per_group), entries=sorted(refs))
-
-
-# --- the public reports: over snapshots of any backend (the *_xpath functions above are the reference they are tested against) ---
+# --- the public reports: over snapshots of any backend (the rules themselves live in validation.py) ---
 
 def validate(source, sset: SchemaSet) -> ValidationReport:
     from .validation import validate_entries
