@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from .models import FileWritten
-from .source import _gpath, _in_bin, pykeepass_open
+from .source import _gpath, _in_bin, pykeepass_open, save_vault, stored_header_hash_ok
 from .write import WriteError, find_entry
 
 if TYPE_CHECKING:
@@ -84,8 +84,10 @@ def export_kdbx(kp: PyKeePass, out: Path, new_password: str) -> FileWritten:
     with _create_exclusive(out):
         pass  # reserve the name atomically; the vault is then written over it
     try:
-        kp.save(filename=str(out))
+        save_vault(kp, out)
         again = pykeepass_open(out, new_password, None)
+        if not stored_header_hash_ok(again, Path(out)):
+            raise WriteError("verification failed: the copy's header does not match its stored hash")
         if len(list(again.entries)) != total:
             raise WriteError("verification failed: the copy has a different number of entries")
     except Exception:

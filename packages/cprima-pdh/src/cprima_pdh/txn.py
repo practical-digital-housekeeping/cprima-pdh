@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Callable, TypeVar
 from pydantic import BaseModel
 
 from .fix import _base, _custom
-from .source import pykeepass_open
+from .source import pykeepass_open, save_vault, stored_header_hash_ok
 from .write import WriteError, _fingerprint, _lock_files
 
 if TYPE_CHECKING:
@@ -86,7 +86,7 @@ def execute(open_db: Callable[[], PyKeePass], db: Path, build: Callable[[PyKeePa
     _stamp(kp, plan)
     if _fingerprint(db) != before_fp:
         raise WriteError("database file changed while working; nothing written")
-    kp.save()
+    save_vault(kp)
 
     again = pykeepass_open(db, kp.password, kp.keyfile)
     problems: list[str] = []
@@ -98,6 +98,8 @@ def execute(open_db: Callable[[], PyKeePass], db: Path, build: Callable[[PyKeePa
         if e is None or (_base(e), _custom(e)) != digest:
             problems.append("an entry that should be unchanged differs")
             break
+    if not stored_header_hash_ok(again, db):
+        problems.append("the file header does not match its stored hash: clients would refuse the file")
     if plan.verify is not None:
         problems += plan.verify(again)
     if problems:

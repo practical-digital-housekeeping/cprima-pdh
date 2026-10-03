@@ -2,10 +2,11 @@
 from pathlib import Path
 
 SRC = Path(__file__).resolve().parents[1] / "src" / "cprima_pdh"
-MAY_SAVE = {"txn.py": "the shared write path", "database.py": "creates a new vault file", "export.py": "writes a copy to --out"}
+MAY_SAVE = {"source.py": "save_vault, the one place that saves (and keeps a KDBX 3 header hash valid)",
+            "database.py": "creates a new vault file"}
 
 
-def test_only_the_write_path_and_the_file_creators_call_save():
+def test_only_save_vault_and_the_file_creator_call_save():
     offenders = sorted(p.name for p in SRC.rglob("*.py") if ".save(" in p.read_text(encoding="utf-8") and p.name not in MAY_SAVE)
     assert not offenders, f"{offenders} save a vault themselves: go through txn.execute"
 

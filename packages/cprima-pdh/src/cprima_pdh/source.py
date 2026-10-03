@@ -1,6 +1,8 @@
 """Reads a KDBX file (via pykeepass) into pdh models. Never saves."""
 from __future__ import annotations
 
+import base64
+import hashlib
 import os
 from collections import Counter
 from datetime import datetime, timedelta, timezone
@@ -36,6 +38,62 @@ def pykeepass_open(path: str | Path, password: str | None, keyfile: str | None) 
     from pykeepass import PyKeePass
 
     return PyKeePass(str(path), password=password, keyfile=keyfile)
+
+
+# --- saving ---------------------------------------------------------------------------------------------------------
+# A KDBX 3.x file stores a hash of its own file header inside the encrypted body (`Meta/HeaderHash`) and clients refuse a
+# file whose header does not match it. pykeepass rotates the header's seeds on every save and never updates that hash, so
+# every file it saves in KDBX 3.x is unreadable for KeePassXC. KDBX 4.x keeps the header hash outside the body (fine).
+
+def header_end(data: bytes) -> int:
+    """Where the KDBX 3.x file header ends: after the two signatures and the version, a list of (id, size, data) fields
+    up to and including the end-of-header field (id 0)."""
+    pos = 12
+    while True:
+        field_id, size = data[pos], int.from_bytes(data[pos + 1:pos + 3], "little")
+        pos += 3 + size
+        if field_id == 0:
+            return pos
+
+
+def _header_hash(path: Path) -> str:
+    data = Path(path).read_bytes()
+    return base64.b64encode(hashlib.sha256(data[:header_end(data)]).digest()).decode()
+
+
+def _meta_header_hash(kp: PyKeePass):
+    tree = kp.tree
+    return (tree.getroot() if hasattr(tree, "getroot") else tree).find("Meta/HeaderHash")
+
+
+def stored_header_hash_ok(kp: PyKeePass, path: Path) -> bool:
+    """True when `path` (a file just written, `kp` reopened from it) has a header hash that matches its header; always
+    true for KDBX 4.x, which has no such field in the body."""
+    if tuple(kp.version)[0] != 3:
+        return True
+    element = _meta_header_hash(kp)
+    return element is not None and element.text == _header_hash(path)
+
+
+def save_vault(kp: PyKeePass, filename: str | Path | None = None) -> None:
+    """Save like `kp.save`, and keep the header hash of a KDBX 3.x file valid (see above)."""
+    kp.save(filename)
+    if tuple(kp.version)[0] != 3:
+        return
+    element = _meta_header_hash(kp)
+    if element is None:
+        return
+    from pykeepass.kdbx_parsing import KDBX
+
+    target = Path(filename) if filename else Path(kp.filename)
+    element.text = _header_hash(target)  # the header just written; building again below keeps it byte for byte
+    tmp = target.with_suffix(".tmp")
+    try:
+        KDBX.build_file(kp.kdbx, tmp, password=kp.password, keyfile=kp.keyfile, transformed_key=None, decrypt=True)
+        os.replace(tmp, target)
+    except Exception:
+        tmp.unlink(missing_ok=True)
+        raise
 
 
 def sidecar(path: Path) -> Path | None:
