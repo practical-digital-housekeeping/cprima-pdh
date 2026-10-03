@@ -131,6 +131,31 @@ class Vault(Protocol):
     def find_entry(self, path: str, username: str | None = None) -> EntryData: ...
 
 
+# Everything a backend may be asked to change. A backend implements what its store can do; the rest answers `Unsupported`.
+WRITE_OPERATIONS = frozenset({
+    "snapshot_history", "history", "prune_history", "set_field", "delete_field", "set_tags", "set_icon", "set_expiry",
+    "set_colours", "set_override_url", "set_autotype", "move_entry", "trash_entry", "restore_entry", "origin_group",
+    "purge_entry", "add_entry", "overwrite_entry", "attach", "attachment", "detach", "add_group", "rename_group",
+    "set_group_notes", "set_group_icon", "move_group", "trash_group", "empty_bin", "bin_enabled", "deleted_ids",
+    "settings", "set_settings", "kdf", "set_kdf", "password", "keyfile", "set_password", "set_keyfile", "can_open",
+    "stamp", "save", "reopen", "file_problems",
+})
+
+
+class VaultBase:
+    """What every backend inherits: reading is its own business, any write operation it does not implement says so."""
+
+    name = "vault"
+
+    def check_writable(self) -> list[str]:
+        return [f"the {self.name} backend does not support writing"]
+
+    def __getattr__(self, attr: str):
+        if attr in WRITE_OPERATIONS:
+            raise Unsupported(f"the {self.name} backend does not support {attr.replace('_', ' ')}")
+        raise AttributeError(attr)
+
+
 def require(vault: Vault, capability: str) -> None:
     """Raise `Unsupported` unless the backend offers the capability."""
     if capability not in vault.capabilities:

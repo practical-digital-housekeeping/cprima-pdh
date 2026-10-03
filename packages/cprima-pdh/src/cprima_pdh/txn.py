@@ -16,7 +16,7 @@ from typing import Callable
 
 from pydantic import BaseModel
 
-from .vault import Vault, as_vault
+from .vault import Unsupported, Vault, as_vault
 from .write import WriteError, _fingerprint, _lock_files
 
 
@@ -54,7 +54,10 @@ def execute_vault(open_vault, db: Path, build, apply: bool) -> BaseModel:
     write and verify."""
     before_fp = _fingerprint(db)
     vault = as_vault(open_vault())
-    plan = build(vault)
+    try:
+        plan = build(vault)
+    except Unsupported as exc:
+        raise WriteError(str(exc)) from None
     if not apply or plan.mutate is None:
         return plan.change
 

@@ -8,7 +8,7 @@ import uuid
 from collections.abc import Iterable
 from dataclasses import replace
 
-from ..vault import EntryData, GroupData, VaultInfo, resolve_entry
+from ..vault import EntryData, GroupData, VaultBase, VaultInfo, resolve_entry
 
 
 def _paths_of(group_path: str) -> list[str]:
@@ -19,7 +19,7 @@ def _paths_of(group_path: str) -> list[str]:
     return ["/".join(parts[:i]) for i in range(1, len(parts) + 1)]
 
 
-class MemoryVault:
+class MemoryVault(VaultBase):
     name = "memory"
     capabilities = frozenset({"fields", "groups", "protected", "tags", "expiry", "otp", "times", "uuid", "icons"})
 

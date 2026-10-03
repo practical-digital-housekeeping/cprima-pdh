@@ -22,7 +22,7 @@ import uuid as uuidlib
 from datetime import datetime, timezone
 from pathlib import Path
 
-from ..vault import STANDARD, EntryData, Field, GroupData, VaultInfo, resolve_entry
+from ..vault import STANDARD, EntryData, Field, GroupData, VaultBase, VaultInfo, resolve_entry
 from .kdbx import STANDARD_ATTR, kdf_name
 
 # KDBX versions whose writing has been verified against genuine KeePassXC files (3.1, 4.0 and 4.1 templates); anything else
@@ -145,7 +145,7 @@ def save_vault(kp, filename: str | Path | None = None) -> None:
 
 
 
-class KdbxVault:
+class KdbxVault(VaultBase):
     name = "kdbx"
     capabilities = frozenset({
         "fields", "groups", "protected", "write", "tags", "expiry", "otp", "times", "uuid", "icons", "colours", "autotype",

@@ -19,7 +19,7 @@ from importlib.util import find_spec
 from pathlib import Path
 from typing import Any
 
-from ..vault import STANDARD, EntryData, Field, GroupData, VaultInfo, resolve_entry
+from ..vault import STANDARD, EntryData, Field, GroupData, VaultBase, VaultInfo, resolve_entry
 from . import age
 from ..sopsfmt import SopsDocument, SopsError, is_sops, open_document
 
@@ -90,7 +90,7 @@ def _when(meta: dict) -> datetime | None:
         return None
 
 
-class SopsVault:
+class SopsVault(VaultBase):
     name = "sops"
     capabilities = frozenset({"fields", "groups", "protected", "tags", "times", "uuid"})
 
