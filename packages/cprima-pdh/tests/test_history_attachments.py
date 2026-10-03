@@ -122,3 +122,58 @@ def test_detach_removes_one_attachment_and_keeps_the_other_intact(vault):
 
 def test_detach_refuses_an_unknown_name(vault):
     assert invoke(vault, "edit", "detach", "Money/With attachments", "zzz", "--apply").exit_code == 2
+
+
+# --- a one-time password that did not exist in the snapshot (found by the end-to-end run) --------------------------------
+
+def _entry_that_got_an_otp_later(vault):
+    from pykeepass import PyKeePass
+
+    kp = PyKeePass(str(vault), password=DEFAULT_PASSWORD)
+    e = next(x for x in kp.entries if x.title == "Tagged")
+    e.save_history()
+    e.otp = "otpauth://totp/x?secret=JBSWY3DPEHPK3PXP"
+    kp.save()
+
+
+def test_restoring_a_state_from_before_the_otp_removes_the_otp(vault):
+    _entry_that_got_an_otp_later(vault)
+    assert entry(vault, "Tagged").otp
+    assert invoke(vault, "edit", "history-restore", "Money/Tagged", "0", "--apply").exit_code == 0
+    assert not entry(vault, "Tagged").otp
+
+
+def test_restoring_a_state_that_had_an_otp_brings_it_back(vault):
+    _entry_that_got_an_otp_later(vault)
+    from pykeepass import PyKeePass
+
+    kp = PyKeePass(str(vault), password=DEFAULT_PASSWORD)
+    e = next(x for x in kp.entries if x.title == "Tagged")
+    e.save_history()
+    e.otp = "otpauth://totp/x?secret=GEZDGNBVGY3TQOJQ"  # a second secret
+    kp.save()
+    assert invoke(vault, "edit", "history-restore", "Money/Tagged", "1", "--apply").exit_code == 0
+    assert "JBSWY3DPEHPK3PXP" in entry(vault, "Tagged").otp
+
+
+def test_a_merge_takes_over_the_removal_of_an_otp(tmp_path):
+    from datetime import datetime, timedelta, timezone
+    import shutil
+
+    from pykeepass import PyKeePass
+
+    local = messy_vault(tmp_path / "l.kdbx").path
+    kp = PyKeePass(str(local), password=DEFAULT_PASSWORD)
+    next(x for x in kp.entries if x.title == "Tagged").otp = "otpauth://totp/x?secret=JBSWY3DPEHPK3PXP"
+    kp.save()
+    other = tmp_path / "o.kdbx"
+    shutil.copyfile(local, other)
+    ko = PyKeePass(str(other), password=DEFAULT_PASSWORD)
+    t = next(x for x in ko.entries if x.title == "Tagged")
+    t._element.remove(t._element.xpath("String[Key='otp']")[0])  # the other copy dropped its otp, later
+    t.mtime = datetime.now(timezone.utc) + timedelta(hours=1)
+    ko.save()
+    result = CliRunner().invoke(app, ["--db", str(local), "io", "merge", str(other), "--apply"],
+                                env={"PDH_IMPORT_PASSWORD": DEFAULT_PASSWORD})
+    assert result.exit_code == 0, result.output + (result.stderr or "")
+    assert not entry(local, "Tagged").otp

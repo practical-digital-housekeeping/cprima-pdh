@@ -175,6 +175,7 @@ def move_entry(
                 problems.append("the moved entry's data changed")
             return problems
 
-        return Plan(change=OrgChange(kind="move", target=path, dest=_gpath(g)), mutate=mutate, touched={uid}, verify=verify)
+        return Plan(change=OrgChange(kind="move", target=path, dest=_gpath(g)), mutate=mutate, touched={uid}, verify=verify,
+                    stamp="location")
 
     return execute(open_db, db, build, apply)

@@ -84,7 +84,7 @@ def _moved_plan(entry, dest, change: OrgChange, expect_group_uuid: Callable[[PyK
             problems.append("the entry's data changed")
         return problems
 
-    return Plan(change=change, touched={uid}, verify=verify)
+    return Plan(change=change, touched={uid}, verify=verify, stamp="location")
 
 
 def delete_entry(open_db: Callable[[], PyKeePass], db: Path, path: str, apply: bool,

@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Callable
 
 from .backends.kdbx import STANDARD_ATTR
 from .entries import _root
-from .history import _state
+from .history import _state, set_otp
 from .models import ImportReport, MergeReport
 from .source import _aware, _gpath, _in_bin
 from .txn import Plan, execute, snapshot
@@ -98,7 +98,7 @@ def _overwrite(target, src, kp: PyKeePass) -> None:
     for attr in ("title", "username", "password", "url", "notes"):
         setattr(target, attr, getattr(src, attr) or "")
     if (src.otp or None) != (target.otp or None):
-        target.otp = src.otp
+        set_otp(target, src.otp)
     for key in list(target.custom_properties or {}):
         if key not in (src.custom_properties or {}):
             target.delete_custom_property(key)
@@ -336,6 +336,7 @@ def merge_vaults(open_db: Callable[[], PyKeePass], db: Path, open_other: Callabl
                     problems.append("a moved entry is not where the other copy has it")
             return problems
 
-        return Plan(change=report, mutate=mutate, touched=touched, count_delta=len(add), verify=verify)
+        return Plan(change=report, mutate=mutate, touched=touched, count_delta=len(add), verify=verify,
+                    stamp="none")  # the entries keep the times of the copy they come from
 
     return execute(open_db, db, build, apply)

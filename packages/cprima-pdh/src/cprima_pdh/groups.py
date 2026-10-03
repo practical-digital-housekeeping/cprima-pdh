@@ -37,11 +37,12 @@ def _is_below(group, ancestor) -> bool:
 
 
 def _group_plan(change: OrgChange, uid, mutate: Callable[[PyKeePass], None], check: Callable[[object], list[str]]) -> Plan:
+    """A change to one group's own properties (stamps its modification time)."""
     def run(kp: PyKeePass) -> None:
         mutate(next(g for g in kp.groups if g.uuid == uid))
         # (mutate receives the group; moves need the database, so they close over `kp` through the plan below)
 
-    return Plan(change=change, mutate=run, verify=lambda again: (
+    return Plan(change=change, mutate=run, touched_groups={uid}, verify=lambda again: (
         check(next((g for g in again.groups if g.uuid == uid), None)) if any(g.uuid == uid for g in again.groups)
         else ["the group is missing"]))
 
@@ -94,7 +95,7 @@ def move_group(open_db: Callable[[], PyKeePass], db: Path, path: str, dest: str,
             x = next((y for y in again.groups if y.uuid == uid), None)
             return [] if x is not None and x.parentgroup.uuid == target_uid else ["the group is not where planned"]
 
-        return Plan(change=change, mutate=mutate, verify=verify)
+        return Plan(change=change, mutate=mutate, verify=verify, touched_groups={uid}, stamp="location")
 
     return execute(open_db, db, build, apply)
 
@@ -124,7 +125,7 @@ def delete_group(open_db: Callable[[], PyKeePass], db: Path, path: str, apply: b
             ok = x is not None and again.recyclebin_group is not None and x.parentgroup.uuid == again.recyclebin_group.uuid
             return [] if ok else ["the group is not in the recycle bin"]
 
-        return Plan(change=change, mutate=mutate, verify=verify)
+        return Plan(change=change, mutate=mutate, verify=verify, touched_groups={uid}, stamp="location")
 
     return execute(open_db, db, build, apply)
 

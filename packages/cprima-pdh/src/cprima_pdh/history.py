@@ -20,6 +20,15 @@ if TYPE_CHECKING:
 _NAME_OF = {attr: name for name, attr in STANDARD_ATTR.items()}
 
 
+def set_otp(entry, value: str | None) -> None:
+    """Set the one-time-password secret of an entry, or remove it when `value` is empty (pykeepass cannot set None)."""
+    if value:
+        entry.otp = value
+        return
+    for element in entry._element.xpath("String[Key='otp']"):
+        entry._element.remove(element)
+
+
 def _state(e) -> dict[str, object]:
     """Everything a snapshot can differ in, by name: standard fields, custom fields, tags, icon, expiry."""
     out: dict[str, object] = {name: getattr(e, attr, None) or "" for name, attr in STANDARD_ATTR.items()}
@@ -62,7 +71,7 @@ def restore_history(open_db: Callable[[], PyKeePass], db: Path, path: str, index
             for attr in ("title", "username", "password", "url", "notes"):
                 setattr(target, attr, getattr(snap, attr) or "")
             if (snap.otp or None) != (target.otp or None):
-                target.otp = snap.otp
+                set_otp(target, snap.otp)
             for key in list(target.custom_properties or {}):
                 if key not in (snap.custom_properties or {}):
                     target.delete_custom_property(key)
@@ -113,6 +122,6 @@ def prune_history(open_db: Callable[[], PyKeePass], db: Path, keep: int, apply: 
             left = {str(e.uuid): len(e.history) for e in again.entries}
             return [] if all(left.get(uid) == keep for uid in excess) else ["history was not pruned as planned"]
 
-        return Plan(change=report, mutate=mutate, touched=set(excess), verify=verify)
+        return Plan(change=report, mutate=mutate, touched=set(excess), verify=verify, stamp="none")  # not an edit
 
     return execute(open_db, db, build, apply)

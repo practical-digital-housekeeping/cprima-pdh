@@ -9,6 +9,7 @@ pdh never makes a backup copy: that is the owner's job.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable, TypeVar
 
@@ -33,6 +34,14 @@ class Plan:
     touched: set[str] = field(default_factory=set)  # UUIDs of entries the mutation may change
     count_delta: int = 0  # expected change of the number of entries (all groups, bin included)
     verify: Callable[[PyKeePass], list[str]] | None = None  # problems found in the reopened file
+    touched_groups: set = field(default_factory=set)  # UUIDs of groups the mutation changes or moves
+    # What to stamp on the touched entries and groups after the mutation. pykeepass' setters leave the times alone,
+    # a client stamps them, and clients, merges and the breach check rely on them:
+    #   "modified": LastModificationTime and LastAccessTime (a content change, the default)
+    #   "location": LocationChanged (the thing was moved or deleted into the bin; its content is as it was)
+    #   "none":     leave the times as the mutation set them (a merge keeps the other copy's times; a history prune
+    #               is not an edit of the entry)
+    stamp: str = "modified"
 
 
 def guard(db: Path) -> None:
@@ -43,6 +52,19 @@ def guard(db: Path) -> None:
 def snapshot(entry) -> None:
     """Save the entry's current state into its History, as the KeePass GUI does before an edit."""
     entry.save_history()
+
+
+def _stamp(kp: PyKeePass, plan: Plan) -> None:
+    if plan.stamp == "none":
+        return
+    for thing in [*(e for e in kp.entries if str(e.uuid) in plan.touched),
+                  *(g for g in kp.groups if g.uuid in plan.touched_groups)]:
+        if plan.stamp == "modified":
+            thing.touch(modify=True)
+        else:
+            element = thing._element.find("Times/LocationChanged")
+            if element is not None:
+                element.text = kp._encode_time(datetime.now(timezone.utc))
 
 
 def _digests(kp: PyKeePass, skip: set[str]) -> dict[str, tuple[str, str]]:
@@ -61,6 +83,7 @@ def execute(open_db: Callable[[], PyKeePass], db: Path, build: Callable[[PyKeePa
     untouched = _digests(kp, plan.touched)
     total = len(list(kp.entries))
     plan.mutate(kp)
+    _stamp(kp, plan)
     if _fingerprint(db) != before_fp:
         raise WriteError("database file changed while working; nothing written")
     kp.save()
