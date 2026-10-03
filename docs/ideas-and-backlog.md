@@ -51,6 +51,22 @@ term's pattern) and what `conform` advises per finding (`[advice.*]`). A test ch
 
 ---
 
+## 2c. Vault capabilities: GUI parity  (DONE, 2026-10-03)
+
+Every function of a KeePass GUI client has a command (dry run unless `--apply`, one save, reopened and verified,
+previous state kept in the entry's history): entries (delete to the bin, restore, purge, clone, tags, expiry, icon,
+colours, URL override, auto-type, history restore/prune, attachments), groups (rename, move, delete, notes, icon),
+the database (create, password, key file, settings, key derivation, empty bin), `io` (CSV and vault import, merge,
+export), `generate`, `inspect otp`, and the online checks `check known-passwords` / `check breaches`.
+Not offered: KDBX 3 to 4 conversion (pykeepass cannot), auto-type and browser integration, the graphical UI.
+Since then: every write goes through `txn.execute` (a test enforces it; bulk edits snapshot each touched entry);
+the write commands run on the genuine KDBX 3.1 and 4.0 templates (`just test-genuine`, about 15 minutes); breach and
+leaked-password findings take level and advice from the profile; `inspect inventory` reports history and attachment
+totals; `delete` records `PreviousParentGroup` in KDBX 4.1 vaults. Open: a hand-made KDBX 4.1 template and the manual
+checks in `docs/manual-e2e.md` (only a human with KeePassXC and KeePassDX can do them).
+
+---
+
 ## 3. Taxonomy and engine  (BACKLOG / OPEN)
 
 - **Relations are implemented:** a field of kind `link` holds another entry's UUID (a KeePass `{REF:T@I:...}`
