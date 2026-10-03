@@ -7,7 +7,9 @@ into the report.
 from __future__ import annotations
 
 from .models import LEVEL_ORDER, ConformanceReport, EntryConformance, Issue, RuleFinding
-from .schema import VOCABULARY, SchemaSet, _bind, validate
+from .schema import VOCABULARY, SchemaSet
+from .validation import live, typing_of, validate_entries
+from .vault import as_vault
 
 
 def _q(text: str) -> str:
@@ -48,15 +50,16 @@ def _issue(f: RuleFinding, sset: SchemaSet) -> Issue:
 def conformance(kp, sset: SchemaSet, status: str = "nonconform", only_schema: str | None = None,
                 level: str = "INFO") -> ConformanceReport:
     """Every live entry as conform / nonconform / unclassified; `status` and `only_schema` filter the list only."""
+    entries = as_vault(kp).entries()  # one snapshot for the whole report
     by_entry: dict[str, list[RuleFinding]] = {}
-    for f in validate(kp, sset).findings:
+    for f in validate_entries(entries, sset).findings:
         if LEVEL_ORDER[f.level] >= LEVEL_ORDER[level]:
             by_entry.setdefault(f.entry, []).append(f)
 
     counts = {"conform": 0, "nonconform": 0, "unclassified": 0}
     listed: list[EntryConformance] = []
-    for e, path, names, _unknown in _bind(kp, sset):
-        ref = f"{path}/{e.title}"
+    for e in live(entries):
+        names, ref = typing_of(e, sset).names, e.path
         issues = [_issue(f, sset) for f in by_entry.get(ref, [])]
         state = "nonconform" if issues else ("conform" if names else "unclassified")
         counts[state] += 1

@@ -738,7 +738,7 @@ def _combined_findings(
     return out
 
 
-def validate(kp: PyKeePass, sset: SchemaSet) -> ValidationReport:
+def validate_xpath(kp: PyKeePass, sset: SchemaSet) -> ValidationReport:
     flat = {n: resolve(d, sset.facets) for n, d in sset.schemas.items()}
     xpaths = {
         n: [(r, etree.XPath(r.xpath)) for r in compile_rules(d, sset, include_closed=False)]
@@ -837,7 +837,7 @@ def worst_level(report: ValidationReport) -> str | None:
     return max((f.level for f in report.findings), key=lambda lvl: LEVEL_ORDER[lvl], default=None)
 
 
-def read(kp: PyKeePass, sset: SchemaSet, only: str | None = None) -> ReadReport:
+def read_xpath(kp: PyKeePass, sset: SchemaSet, only: str | None = None) -> ReadReport:
     """Entries as typed records of their schema's fields; protected values are not read."""
     flat = {n: resolve(d, sset.facets) for n, d in sset.schemas.items()}
     out: list[TypedEntry] = []
@@ -864,7 +864,7 @@ def read(kp: PyKeePass, sset: SchemaSet, only: str | None = None) -> ReadReport:
     return ReadReport(entries=out, unclassified_entries=unclassified)
 
 
-def links_report(kp: PyKeePass, sset: SchemaSet) -> LinksReport:
+def links_report_xpath(kp: PyKeePass, sset: SchemaSet) -> LinksReport:
     """Every link of every typed entry with its status, and how many links each target receives."""
     flat = {n: resolve(d, sset.facets) for n, d in sset.schemas.items()}
     bound = list(_bind(kp, sset))
@@ -884,7 +884,7 @@ def links_report(kp: PyKeePass, sset: SchemaSet) -> LinksReport:
     return LinksReport(links=links, per_target=dict(per_target))
 
 
-def unclassified(kp: PyKeePass, sset: SchemaSet, list_entries: bool = False) -> UnclassifiedReport:
+def unclassified_xpath(kp: PyKeePass, sset: SchemaSet, list_entries: bool = False) -> UnclassifiedReport:
     """Live entries without a valid `_schema`: the seeding to-do list."""
     per_group: Counter[str] = Counter()
     refs: list[str] = []
@@ -895,3 +895,33 @@ def unclassified(kp: PyKeePass, sset: SchemaSet, list_entries: bool = False) -> 
         if list_entries:
             refs.append(f"{path}/{e.title}")
     return UnclassifiedReport(total=sum(per_group.values()), per_group=dict(per_group), entries=sorted(refs))
+
+
+# --- the public reports: over snapshots of any backend (the *_xpath functions above are the reference they are tested against) ---
+
+def validate(source, sset: SchemaSet) -> ValidationReport:
+    from .validation import validate_entries
+    from .vault import as_vault
+
+    return validate_entries(as_vault(source).entries(), sset)
+
+
+def read(source, sset: SchemaSet, only: str | None = None) -> ReadReport:
+    from .validation import read_entries
+    from .vault import as_vault
+
+    return read_entries(as_vault(source).entries(), sset, only)
+
+
+def links_report(source, sset: SchemaSet) -> LinksReport:
+    from .validation import links_for
+    from .vault import as_vault
+
+    return links_for(as_vault(source).entries(), sset)
+
+
+def unclassified(source, sset: SchemaSet, list_entries: bool = False) -> UnclassifiedReport:
+    from .validation import unclassified_for
+    from .vault import as_vault
+
+    return unclassified_for(as_vault(source).entries(), sset, list_entries)

@@ -9,8 +9,10 @@ from __future__ import annotations
 
 import re
 
-from .backends.kdbx import OTP_PREFIXES  # (the KeePass 2 OTP plugin's own fields are not user fields; moves to the backend)
-from .models import RuleFinding, SchemaStats, ValidationReport
+from collections import Counter
+
+from .backends.kdbx import OTP_PREFIXES, STANDARD_PROTECTED  # (the KeePass 2 OTP plugin's own fields are not user fields; moves to the backend)
+from .models import Link, LinksReport, ReadReport, RuleFinding, SchemaStats, TypedEntry, UnclassifiedReport, ValidationReport
 from .schema import (
     SCHEMA_PSEUDO,
     VOCABULARY,
@@ -20,6 +22,7 @@ from .schema import (
     _effective_protected,
     _LINK_MESSAGES,
     _merge,
+    _union,
     _schema_fields,
     lookup_term,
     parse_link,
@@ -274,3 +277,66 @@ def validate_entries(entries: list[EntryData], sset: SchemaSet) -> ValidationRep
     if exact or matchers:
         stats[VOCABULARY] = SchemaStats(entries=vocab[0], conforming=vocab[1], with_findings=vocab[0] - vocab[1])
     return ValidationReport(schemas=stats, unclassified_entries=unclassified, findings=findings)
+
+
+# --- the other reports --------------------------------------------------------------------------------------------------------
+
+def read_entries(entries: list[EntryData], sset: SchemaSet, only: str | None = None) -> ReadReport:
+    """Entries as typed records of their schema's fields; protected values are not read."""
+    flat = {n: resolve(d, sset.facets) for n, d in sset.schemas.items()}
+    out: list[TypedEntry] = []
+    unclassified = 0
+    for e in live(entries):
+        names = typing_of(e, sset).names
+        if not names:
+            unclassified += 1
+            continue
+        for name in names:  # one typed record per schema the entry names
+            if only and name != only:
+                continue
+            d = flat[name]
+            protected = _effective_protected(d, sset.fields)
+            values: dict[str, str] = {}
+            keys = _union(_union(_union(_union(d.required, d.recommended), d.optional), d.protected), list(d.types))
+            for key in _union(keys, list(d.links)):
+                value = field_value(e, key)
+                if key in STANDARD_PROTECTED or key in protected or e.is_protected(key):
+                    if value:
+                        values[key] = "(protected)"
+                elif value:
+                    values[key] = value
+            out.append(TypedEntry(schema=name, entry=e.path, fields=values))
+    out.sort(key=lambda t: (t.schema_name, t.entry))
+    return ReadReport(entries=out, unclassified_entries=unclassified)
+
+
+def links_for(entries: list[EntryData], sset: SchemaSet) -> LinksReport:
+    """Every link of every typed entry with its status, and how many links each target receives."""
+    flat = {n: resolve(d, sset.facets) for n, d in sset.schemas.items()}
+    bound = [(e, typing_of(e, sset)) for e in live(entries)]
+    index = {uuid_key(e.id): (e, t.names) for e, t in bound}
+    seen: dict[tuple[str, str], Link] = {}
+    for e, t in bound:
+        for n in t.names:
+            for fld, targets in flat[n].links.items():
+                raw = e.fields[fld].value if fld in e.fields else ""
+                if not raw or not raw.strip() or (e.path, fld) in seen:
+                    continue
+                status, target = _resolve_link(e, raw, targets, index)
+                seen[(e.path, fld)] = Link(source=e.path, field=fld, target=target, status=status)
+    links = sorted(seen.values(), key=lambda lk: (lk.source, lk.field))
+    per_target = Counter(lk.target for lk in links if lk.target and lk.status != "self")
+    return LinksReport(links=links, per_target=dict(per_target))
+
+
+def unclassified_for(entries: list[EntryData], sset: SchemaSet, list_entries: bool = False) -> UnclassifiedReport:
+    """Live entries without a record type: the seeding to-do list."""
+    per_group: Counter[str] = Counter()
+    refs: list[str] = []
+    for e in live(entries):
+        if typing_of(e, sset).names:
+            continue
+        per_group[e.group_path] += 1
+        if list_entries:
+            refs.append(e.path)
+    return UnclassifiedReport(total=sum(per_group.values()), per_group=dict(per_group), entries=sorted(refs))

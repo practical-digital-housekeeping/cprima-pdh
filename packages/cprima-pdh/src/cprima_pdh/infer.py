@@ -2,43 +2,36 @@
 from __future__ import annotations
 
 from collections import Counter
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from pykeepass import PyKeePass
 
 from .models import FieldUsage, GroupProfile, InferReport
-from .source import _gpath, _in_bin, _totp_style
+from .source import _totp_style_of
+from .vault import as_vault
 
 
-def infer(kp: PyKeePass) -> InferReport:
-    rb = kp.recyclebin_group
-    bin_uuid = rb.uuid if rb is not None else None
+def infer(source) -> InferReport:
     groups: dict[str, dict] = {}
-    for e in kp.entries:
-        if bin_uuid is not None and _in_bin(e.group, bin_uuid):
+    for e in as_vault(source).entries():
+        if e.in_bin:
             continue
+        name = e.group_path.rsplit("/", 1)[-1] if e.group_path != "/" else "/"  # the leaf group name; repeated names merge
         g = groups.setdefault(
-            e.group.name or "/",
+            name,
             {"paths": set(), "n": 0, "user": 0, "url": 0, "notes": 0, "expiry": 0, "totp": 0, "https": 0,
              "fields": Counter(), "prot": Counter()},
         )
-        props = e.custom_properties or {}
-        g["paths"].add(_gpath(e.group))
+        g["paths"].add(e.group_path)
         g["n"] += 1
         g["user"] += bool(e.username)
         g["url"] += bool(e.url)
         g["notes"] += bool(e.notes)
         g["expiry"] += bool(e.expires)
-        g["totp"] += _totp_style(e, props) is not None
-        g["https"] += (e.url or "").lower().startswith("https://")
-        for key, val in props.items():
-            if not val:
+        g["totp"] += _totp_style_of(e) is not None
+        g["https"] += e.url.lower().startswith("https://")
+        for key, field in e.fields.items():
+            if not field.value:
                 continue
             g["fields"][key] += 1
-            g["prot"][key] += bool(
-                e._element.xpath("boolean(String[Key=$k]/Value[@Protected='True'])", k=key)
-            )
+            g["prot"][key] += field.protected
 
     profiles = [
         GroupProfile(

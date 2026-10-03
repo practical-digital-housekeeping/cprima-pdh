@@ -125,7 +125,7 @@ class KdbxVault:
         for e in self.kp.entries:
             history = list(e.history or [])
             out.append(EntryData(
-                id=str(e.uuid), group_path=_group_path(e.group), title=e.title or "", username=e.username or "",
+                id=str(e.uuid), group_path=_group_path(e.group), group_id=str(e.group.uuid), title=e.title or "", username=e.username or "",
                 password=e.password or "", url=e.url or "", notes=e.notes or "", otp=e.otp or "",
                 tags=tuple(e.tags or ()), icon=str(e.icon if e.icon is not None else "0"),
                 expires=bool(e.expires), expiry=_aware(e.expiry_time) if e.expires else None,

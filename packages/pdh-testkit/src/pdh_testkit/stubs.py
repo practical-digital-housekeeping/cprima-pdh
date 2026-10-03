@@ -77,6 +77,17 @@ class StubEntry:
     def protected(self, key: str) -> bool:
         return bool(self._element.xpath("boolean(String[Key=$k]/Value[@Protected='True'])", k=key))
 
+    def snapshot(self, in_bin: bool = False):
+        """This stub as the engine's EntryData (what a backend's `entries()` would hand out)."""
+        from cprima_pdh.vault import STANDARD, EntryData, Field
+
+        return EntryData(
+            id=str(self.uuid), group_path="/".join(self.group.path) or "/", title=self.title or "",
+            username=self.username or "", password=self.password or "", url=self.url or "", notes=self.notes or "",
+            otp=self.otp or "", tags=tuple(self.tags), expires=self.expires, in_bin=in_bin,
+            fields={k: Field(v, self.protected(k)) for k, v in self.custom_properties.items()},
+            protected_standard=frozenset(n for n in STANDARD if self.protected(n)))
+
 
 class StubKP:
     """A database with only what kpcli reads: entries, and optionally a recycle bin group."""
@@ -85,6 +96,21 @@ class StubKP:
         self.entries = entries
         self.recyclebin_group = recyclebin_group
         self.groups = list({id(e.group): e.group for e in entries}.values())
+
+    def __vault__(self):
+        """The Vault view of this fake (see `cprima_pdh.vault.as_vault`)."""
+        from cprima_pdh.backends.memory import MemoryVault
+
+        bin_uuid = self.recyclebin_group.uuid if self.recyclebin_group is not None else None
+
+        def inside(group) -> bool:
+            while group is not None:
+                if bin_uuid is not None and group.uuid == bin_uuid:
+                    return True
+                group = group.parentgroup
+            return False
+
+        return MemoryVault([e.snapshot(in_bin=inside(e.group)) for e in self.entries])
 
     def find_entries(self, uuid=None, first=False, **_kw):  # the one lookup the write code uses
         hits = [e for e in self.entries if uuid is not None and str(e.uuid) == str(uuid)]

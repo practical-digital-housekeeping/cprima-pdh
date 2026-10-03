@@ -13,7 +13,17 @@ from pykeepass import PyKeePass
 
 from cprima_pdh import profiles
 from cprima_pdh.backends.kdbx import KdbxVault
-from cprima_pdh.schema import make_ref, parse_schemas, validate
+from cprima_pdh.schema import (
+    links_report,
+    links_report_xpath,
+    make_ref,
+    parse_schemas,
+    read,
+    read_xpath,
+    unclassified,
+    unclassified_xpath,
+    validate_xpath as validate,
+)
 from cprima_pdh.source import pykeepass_open
 from cprima_pdh.validation import validate_entries
 
@@ -164,3 +174,12 @@ def test_the_canonical_and_the_sample_vault_give_identical_reports():
         old, new = validate(kp, sset), validate_entries(KdbxVault(kp).entries(), sset)
         assert old == new, show(old, new)
         assert old.findings == []  # (both are conforming by construction)
+
+
+def test_read_links_and_unclassified_reports_are_identical_too(generated):
+    for sset in (FRAGMENT, profiles.load("pdh-default")):
+        kp = pykeepass_open(generated, DEFAULT_PASSWORD, None)
+        assert read(kp, sset) == read_xpath(kp, sset)
+        assert read(kp, sset, only="card") == read_xpath(kp, sset, only="card")
+        assert links_report(kp, sset) == links_report_xpath(kp, sset)
+        assert unclassified(kp, sset, True) == unclassified_xpath(kp, sset, True)

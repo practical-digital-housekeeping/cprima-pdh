@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Iterable
+from dataclasses import replace
 
 from ..vault import EntryData, GroupData, VaultInfo, resolve_entry
 
@@ -25,6 +26,8 @@ class MemoryVault:
     def __init__(self, entries: Iterable[EntryData] = (), groups: Iterable[GroupData] | None = None):
         self._entries = list(entries)
         self._groups = list(groups) if groups is not None else self._derive_groups()
+        by_path = {g.path: g.id for g in self._groups}
+        self._entries = [replace(e, group_id=by_path.get(e.group_path, "")) if not e.group_id else e for e in self._entries]
 
     def _derive_groups(self) -> list[GroupData]:
         root = GroupData(id=str(uuid.uuid4()), path="/", name="", is_root=True)

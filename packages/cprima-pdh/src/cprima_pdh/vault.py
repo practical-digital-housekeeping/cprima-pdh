@@ -42,6 +42,7 @@ class EntryData:
 
     id: str
     group_path: str  # slash-joined names below the root; "/" for an entry directly in the root group
+    group_id: str = ""  # the id of that group (groups with equal paths stay apart)
     title: str = ""
     username: str = ""
     password: str = ""
@@ -147,6 +148,8 @@ def as_vault(obj) -> Vault:
     nothing hands a raw pykeepass object around any more.)"""
     if hasattr(obj, "capabilities") and callable(getattr(obj, "entries", None)):
         return obj
+    if hasattr(obj, "__vault__"):  # a fake or adapter that knows its own Vault view
+        return obj.__vault__()
     from .backends.kdbx import KdbxVault
 
     return KdbxVault(obj)
