@@ -1,28 +1,23 @@
-"""The one write path: plan, apply, save once, reopen and verify.
+"""The one write path: plan, apply, save once to a temporary file, reopen, verify, replace.
 
-A command describes what it wants as a `Plan`: the change it reports (always, also as a dry run), the in-memory
-mutation, which entries it may touch, and what must be true after reopening the saved file. `execute` does the rest:
-refuses when the file is open elsewhere or changed meanwhile, makes sure every other entry is byte-for-byte unchanged
-and the entry count is what the plan says, and raises `WriteError` otherwise. Nothing is written without `apply`, and
-pdh never makes a backup copy: that is the owner's job.
+A command describes what it wants as a `Plan`: the change it reports (always, also as a dry run), the mutation (a function
+of the opened Vault), which entries it may touch, and what must be true after reopening the saved file. `execute_vault`
+does the rest: refuses when the file is open elsewhere or changed meanwhile, refuses formats nobody has verified writing,
+makes sure every other entry is unchanged and the entry count is what the plan says, and raises `WriteError` otherwise.
+The new file is written beside the vault and replaces it only after it has been checked, so a failed check never damages
+the vault. Nothing is written without `apply`, and pdh never makes a backup copy: that is the owner's job.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
+import os
+from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable, TypeVar
+from typing import Callable
 
 from pydantic import BaseModel
 
-from .fix import _base, _custom
-from .source import pykeepass_open, save_vault, stored_header_hash_ok
+from .vault import Vault, as_vault
 from .write import WriteError, _fingerprint, _lock_files
-
-if TYPE_CHECKING:
-    from pykeepass import PyKeePass
-
-C = TypeVar("C", bound=BaseModel)
 
 
 @dataclass
@@ -30,15 +25,15 @@ class Plan:
     """What a command wants to do. `change` needs an `applied` field; it is set to True after a verified write."""
 
     change: BaseModel
-    mutate: Callable[[PyKeePass], None] | None = None  # None: nothing to do (a no-op, or the plan is only a report)
-    touched: set[str] = field(default_factory=set)  # UUIDs of entries the mutation may change
+    mutate: Callable[[Vault], None] | None = None  # None: nothing to do (a no-op, or the plan is only a report)
+    touched: set[str] = field(default_factory=set)  # ids of entries the mutation may change
     count_delta: int = 0  # expected change of the number of entries (all groups, bin included)
-    verify: Callable[[PyKeePass], list[str]] | None = None  # problems found in the reopened file
-    touched_groups: set = field(default_factory=set)  # UUIDs of groups the mutation changes or moves
-    # What to stamp on the touched entries and groups after the mutation. pykeepass' setters leave the times alone,
+    verify: Callable[[Vault], list[str]] | None = None  # problems found in the reopened file
+    touched_groups: set[str] = field(default_factory=set)  # ids of groups the mutation changes or moves
+    # What to stamp on the touched entries and groups after the mutation. A store's setters may leave the times alone,
     # a client stamps them, and clients, merges and the breach check rely on them:
-    #   "modified": LastModificationTime and LastAccessTime (a content change, the default)
-    #   "location": LocationChanged (the thing was moved or deleted into the bin; its content is as it was)
+    #   "modified": modification and access time (a content change, the default)
+    #   "location": when it was moved (or deleted into the bin; its content is as it was)
     #   "none":     leave the times as the mutation set them (a merge keeps the other copy's times; a history prune
     #               is not an edit of the entry)
     stamp: str = "modified"
@@ -49,59 +44,49 @@ def guard(db: Path) -> None:
         raise WriteError(f"database seems open elsewhere (lock file {locks[0].name}); close it first")
 
 
-def snapshot(entry) -> None:
-    """Save the entry's current state into its History, as the KeePass GUI does before an edit."""
-    entry.save_history()
+def _content(e) -> object:
+    """An entry as it must stay when untouched: everything but where it sits (a moved group changes paths)."""
+    return replace(e, group_path="", group_id="", in_bin=False)
 
 
-def _stamp(kp: PyKeePass, plan: Plan) -> None:
-    if plan.stamp == "none":
-        return
-    for thing in [*(e for e in kp.entries if str(e.uuid) in plan.touched),
-                  *(g for g in kp.groups if g.uuid in plan.touched_groups)]:
-        if plan.stamp == "modified":
-            thing.touch(modify=True)
-        else:
-            element = thing._element.find("Times/LocationChanged")
-            if element is not None:
-                element.text = kp._encode_time(datetime.now(timezone.utc))
-
-
-def _digests(kp: PyKeePass, skip: set[str]) -> dict[str, tuple[str, str]]:
-    return {str(e.uuid): (_base(e), _custom(e)) for e in kp.entries if str(e.uuid) not in skip}
-
-
-def execute(open_db: Callable[[], PyKeePass], db: Path, build: Callable[[PyKeePass], Plan], apply: bool) -> BaseModel:
-    """Run `build` on the opened vault; without `apply` return its change untouched, else write and verify."""
+def execute_vault(open_vault, db: Path, build, apply: bool) -> BaseModel:
+    """Run `build(vault)` (it returns a `Plan`) on the opened vault; without `apply` return its change untouched, else
+    write and verify."""
     before_fp = _fingerprint(db)
-    kp = open_db()
-    plan = build(kp)
+    vault = as_vault(open_vault())
+    plan = build(vault)
     if not apply or plan.mutate is None:
         return plan.change
 
     guard(db)
-    untouched = _digests(kp, plan.touched)
-    total = len(list(kp.entries))
-    plan.mutate(kp)
-    _stamp(kp, plan)
+    if problems := vault.check_writable():
+        raise WriteError("; ".join(problems))
+    before = {e.id: _content(e) for e in vault.entries() if e.id not in plan.touched}
+    total = len(vault.entries())
+    plan.mutate(vault)
+    vault.stamp(plan.touched, set(plan.touched_groups), plan.stamp)
     if _fingerprint(db) != before_fp:
         raise WriteError("database file changed while working; nothing written")
-    save_vault(kp)
-
-    again = pykeepass_open(db, kp.password, kp.keyfile)
-    problems: list[str] = []
-    entries = {str(e.uuid): e for e in again.entries}
-    if len(entries) != total + plan.count_delta:
-        problems.append(f"entry count changed ({total} -> {len(entries)}, expected {total + plan.count_delta})")
-    for uid, digest in untouched.items():
-        e = entries.get(uid)
-        if e is None or (_base(e), _custom(e)) != digest:
-            problems.append("an entry that should be unchanged differs")
-            break
-    if not stored_header_hash_ok(again, db):
-        problems.append("the file header does not match its stored hash: clients would refuse the file")
-    if plan.verify is not None:
-        problems += plan.verify(again)
-    if problems:
-        raise WriteError("verification failed: " + "; ".join(sorted(set(problems))) + ". Restore from your own backup.")
+    temp = db.with_name(db.stem + ".pdh-new" + db.suffix)
+    try:
+        vault.save(temp)
+        again = vault.reopen(temp)
+        found = {e.id: e for e in again.entries()}
+        problems = []
+        if len(found) != total + plan.count_delta:
+            problems.append(f"entry count changed ({total} -> {len(found)}, expected {total + plan.count_delta})")
+        for uid, content in before.items():
+            e = found.get(uid)
+            if e is None or _content(e) != content:
+                problems.append("an entry that should be unchanged differs")
+                break
+        problems += again.file_problems(temp)
+        if plan.verify is not None:
+            problems += plan.verify(again)
+        if problems:
+            raise WriteError("verification failed: " + "; ".join(sorted(set(problems)))
+                             + ". The vault was not changed.")
+        os.replace(temp, db)
+    finally:
+        temp.unlink(missing_ok=True)
     return plan.change.model_copy(update={"applied": True})

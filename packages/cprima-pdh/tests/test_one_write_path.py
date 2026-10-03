@@ -3,7 +3,9 @@ from pathlib import Path
 
 SRC = Path(__file__).resolve().parents[1] / "src" / "cprima_pdh"
 MAY_SAVE = {"source.py": "save_vault, the one place that saves (and keeps a KDBX 3 header hash valid)",
-            "database.py": "creates a new vault file"}
+            "export.py": "export_kdbx writes a copy to a new, exclusively created file; the vault itself is untouched",
+            "kdbx_vault.py": "KdbxVault.create makes a new vault file",
+            "txn.py": "execute_vault, the one write path: the vault saves to a temporary file that replaces it once verified"}
 
 
 def test_only_save_vault_and_the_file_creator_call_save():

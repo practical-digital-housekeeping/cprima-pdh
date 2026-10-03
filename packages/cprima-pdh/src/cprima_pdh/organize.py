@@ -5,22 +5,19 @@ existence of the new group) may change; this is verified by reopening the saved 
 """
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable
+from typing import Callable
 
-from .fix import _base, _custom
 from .models import OrgChange
-from .source import _gpath
-
-if TYPE_CHECKING:
-    from pykeepass import PyKeePass
-from .write import WriteError, find_entry
+from .vault import EntryData, Field, GroupData, Vault
+from .write import WriteError, find_data
 
 
-def find_group(kp: PyKeePass, path: str):
+def find_group(vault: Vault, path: str) -> GroupData:
     """The single group whose path (as shown by `tree`/validate) equals path; '/' is the root."""
     wanted = "/" if path in ("", "/") else path.strip("/")
-    hits = [g for g in kp.groups if _gpath(g) == wanted]
+    hits = [g for g in vault.groups() if g.path == wanted]
     if not hits:
         raise WriteError(f"no group {path!r}")
     if len(hits) > 1:
@@ -28,26 +25,26 @@ def find_group(kp: PyKeePass, path: str):
     return hits[0]
 
 
-def new_group(open_db: Callable[[], PyKeePass], db: Path, parent: str, name: str, apply: bool) -> OrgChange:
+def new_group(open_db: Callable[[], object], db: Path, parent: str, name: str, apply: bool) -> OrgChange:
     """Create a group below `parent`."""
-    from .txn import Plan, execute
+    from .txn import Plan, execute_vault
 
-    def build(kp: PyKeePass) -> Plan:
-        p = find_group(kp, parent)
+    def build(vault: Vault) -> Plan:
+        p = find_group(vault, parent)
         if not name or "/" in name:
             raise WriteError("group name must be non-empty and must not contain '/'")
-        if any(g.name == name for g in p.subgroups):
+        groups = vault.groups()
+        if any(g.name == name and g.parent_id == p.id for g in groups):
             raise WriteError(f"{parent!r} already has a group {name!r}")
-        parent_path = _gpath(p)
-        target = name if parent_path == "/" else f"{parent_path}/{name}"
-        parent_uid, n_groups = p.uuid, len(list(kp.groups))
+        target = name if p.path == "/" else f"{p.path}/{name}"
+        n_groups = len(groups)
 
-        def mutate(k: PyKeePass) -> None:
-            k.add_group(next(g for g in k.groups if g.uuid == parent_uid), name)
+        def mutate(v: Vault) -> None:
+            v.add_group(p.id, name)
 
-        def verify(again: PyKeePass) -> list[str]:
+        def verify(again: Vault) -> list[str]:
             problems = []
-            if len(list(again.groups)) != n_groups + 1:
+            if len(again.groups()) != n_groups + 1:
                 problems.append("group count did not grow by one")
             try:
                 find_group(again, target)
@@ -55,12 +52,12 @@ def new_group(open_db: Callable[[], PyKeePass], db: Path, parent: str, name: str
                 problems.append("the new group is missing")
             return problems
 
-        return Plan(change=OrgChange(kind="new-group", target=target, dest=parent_path), mutate=mutate, verify=verify)
+        return Plan(change=OrgChange(kind="new-group", target=target, dest=p.path), mutate=mutate, verify=verify)
 
-    return execute(open_db, db, build, apply)
+    return execute_vault(open_db, db, build, apply)
 
 
-def new_entry(open_db: Callable[[], PyKeePass], db: Path, group: str, title: str, username: str, password: str,
+def new_entry(open_db: Callable[[], object], db: Path, group: str, title: str, username: str, password: str,
               apply: bool, url: str | None = None, notes: str | None = None, tags: list[str] | None = None,
               expires: str | None = None, fields: dict[str, str] | None = None,
               secret_fields: dict[str, str] | None = None) -> OrgChange:
@@ -68,7 +65,7 @@ def new_entry(open_db: Callable[[], PyKeePass], db: Path, group: str, title: str
     from datetime import date, datetime, timezone
 
     from .backends.kdbx import OTP_PREFIXES, STANDARD_ATTR
-    from .txn import Plan, execute
+    from .txn import Plan, execute_vault
 
     fields, secret_fields, tags = dict(fields or {}), dict(secret_fields or {}), list(tags or [])
     day = None
@@ -86,47 +83,45 @@ def new_entry(open_db: Callable[[], PyKeePass], db: Path, group: str, title: str
         if not tag.strip() or ";" in tag or "," in tag:
             raise WriteError(f"tag {tag!r} must be non-empty and contain no ';' or ','")
 
-    def build(kp: PyKeePass) -> Plan:
-        g = find_group(kp, group)
+    def build(vault: Vault) -> Plan:
+        g = find_group(vault, group)
         if not title or "/" in title:
             raise WriteError("title must be non-empty and must not contain '/'")
-        if any(e.title == title for e in g.entries):
+        if any(e.title == title and e.group_id == g.id for e in vault.entries()):
             raise WriteError(f"{group!r} already has an entry {title!r}")
-        group_path, group_uid = _gpath(g), g.uuid
-        change = OrgChange(kind="new-entry", target=f"{group_path}/{title}", dest=group_path)
+        change = OrgChange(kind="new-entry", target=f"{g.path}/{title}", dest=g.path)
+        moment = datetime(day.year, day.month, day.day, tzinfo=timezone.utc) if day is not None else None
+        data = EntryData(
+            id="", group_path=g.path, group_id=g.id, title=title, username=username, password=password, url=url or "",
+            notes=notes or "", tags=tuple(tags), expires=day is not None, expiry=moment,
+            fields={**{n: Field(v, False) for n, v in fields.items()}, **{n: Field(v, True) for n, v in secret_fields.items()}})
 
-        def mutate(k: PyKeePass) -> None:
-            target = next(x for x in k.groups if x.uuid == group_uid)
-            made = k.add_entry(target, title, username, password, url=url, notes=notes, tags=tags or None)
-            for name, value in fields.items():
-                made.set_custom_property(name, value)
-            for name, value in secret_fields.items():
-                made.set_custom_property(name, value, protect=True)
-            if day is not None:
-                made.expiry_time, made.expires = datetime(day.year, day.month, day.day, tzinfo=timezone.utc), True
+        def mutate(v: Vault) -> None:
+            v.add_entry(g.id, data)
 
-        def verify(again: PyKeePass) -> list[str]:
-            made = [e for e in again.entries if e.title == title and e.group.uuid == group_uid]
+        def verify(again: Vault) -> list[str]:
+            made = [e for e in again.entries() if e.title == title and e.group_id == g.id]
             if len(made) != 1:
                 return ["the new entry is missing"]
             e = made[0]
             problems = []
             if (e.username, e.password, e.url or None, e.notes or None) != (username, password, url or None, notes or None):
                 problems.append("the stored standard fields differ")
-            if sorted(e.tags or []) != sorted(tags):
+            if sorted(e.tags) != sorted(tags):
                 problems.append("the stored tags differ")
             for name, value in {**fields, **secret_fields}.items():
-                if e.get_custom_property(name) != value:
+                got = e.fields.get(name)
+                if got is None or got.value != value:
                     problems.append("a custom field differs")
-                if e.is_custom_property_protected(name) != (name in secret_fields):
+                elif got.protected != (name in secret_fields):
                     problems.append("a custom field has the wrong protection")
-            if (day is not None) != bool(e.expires):
+            if (day is not None) != e.expires:
                 problems.append("the expiry differs")
             return problems
 
         return Plan(change=change, mutate=mutate, count_delta=1, verify=verify)
 
-    return execute(open_db, db, build, apply)
+    return execute_vault(open_db, db, build, apply)
 
 
 def _top(group_path: str) -> str:
@@ -134,8 +129,13 @@ def _top(group_path: str) -> str:
     return "" if group_path == "/" else group_path.split("/", 1)[0]
 
 
+def _same_data(e: EntryData) -> EntryData:
+    """An entry minus where it is and when it was moved: what a move must leave alone."""
+    return replace(e, group_path="", group_id="", in_bin=False, location_changed=None)
+
+
 def move_entry(
-    open_db: Callable[[], PyKeePass],
+    open_db: Callable[[], object],
     db: Path,
     path: str,
     dest: str,
@@ -144,38 +144,38 @@ def move_entry(
     cross_top_level: bool = False,
 ) -> OrgChange:
     """Move an entry to another group (its UUID is kept). A move changes the location, not the content: no history."""
-    from .txn import Plan, execute
+    from .txn import Plan, execute_vault
 
-    def build(kp: PyKeePass) -> Plan:
-        e = find_entry(kp, path, username)
-        g = find_group(kp, dest)
-        if str(e.group.uuid) == str(g.uuid):
+    def build(vault: Vault) -> Plan:
+        e = find_data(vault, path, username)
+        g = find_group(vault, dest)
+        if e.group_id == g.id:
             raise WriteError(f"{path!r} is already in {dest!r}")
-        if not cross_top_level and _top(_gpath(e.group)) != _top(_gpath(g)):
+        if not cross_top_level and _top(e.group_path) != _top(g.path):
             raise WriteError(
-                f"{path!r} is under {_top(_gpath(e.group)) or 'the root'!r} but {dest!r} is under "
-                f"{_top(_gpath(g)) or 'the root'!r}; moves stay inside one top-level group (use --cross-top-level to override)"
+                f"{path!r} is under {_top(e.group_path) or 'the root'!r} but {dest!r} is under "
+                f"{_top(g.path) or 'the root'!r}; moves stay inside one top-level group (use --cross-top-level to override)"
             )
-        if any(x.title == e.title for x in g.entries):
+        if any(x.title == e.title and x.group_id == g.id for x in vault.entries()):
             raise WriteError(f"{dest!r} already has an entry titled {e.title!r}; rename one first")
-        uid, dest_uid = str(e.uuid), g.uuid
-        expect = (_base(e, with_group=False), _custom(e))
+        uid = e.id
+        expect = _same_data(e)
 
-        def mutate(k: PyKeePass) -> None:
-            k.move_entry(next(x for x in k.entries if str(x.uuid) == uid), next(x for x in k.groups if x.uuid == dest_uid))
+        def mutate(v: Vault) -> None:
+            v.move_entry(uid, g.id)
 
-        def verify(again: PyKeePass) -> list[str]:
-            moved = next((x for x in again.entries if str(x.uuid) == uid), None)
+        def verify(again: Vault) -> list[str]:
+            moved = next((x for x in again.entries() if x.id == uid), None)
             if moved is None:
                 return ["the moved entry is missing"]
             problems = []
-            if moved.group.uuid != dest_uid:
+            if moved.group_id != g.id:
                 problems.append("the entry is not in the destination group")
-            if (_base(moved, with_group=False), _custom(moved)) != expect:
+            if _same_data(moved) != expect:
                 problems.append("the moved entry's data changed")
             return problems
 
-        return Plan(change=OrgChange(kind="move", target=path, dest=_gpath(g)), mutate=mutate, touched={uid}, verify=verify,
+        return Plan(change=OrgChange(kind="move", target=path, dest=g.path), mutate=mutate, touched={uid}, verify=verify,
                     stamp="location")
 
-    return execute(open_db, db, build, apply)
+    return execute_vault(open_db, db, build, apply)

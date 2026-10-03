@@ -84,10 +84,10 @@ def test_a_new_master_password_keeps_the_hash_valid(work):
 
 def test_the_write_path_would_refuse_a_file_whose_hash_is_stale(work, monkeypatch):
     """The verification step catches it even if the fix is ever bypassed (pdh's reopen alone cannot see it)."""
-    import cprima_pdh.txn as txn
+    import cprima_pdh.source as source
     from cprima_pdh.write import WriteError
 
-    monkeypatch.setattr(txn, "save_vault", lambda kp: kp.save())  # the unfixed save
+    monkeypatch.setattr(source, "save_vault", lambda kp, path=None: kp.save(path))  # the unfixed save
     result = CliRunner().invoke(app, ["--db", str(work), "edit", "new-group", "/", "Money", "--apply"])
     assert result.exit_code == 2 and "header" in (result.stderr or "").lower()
     assert WriteError  # (imported for the message type only)

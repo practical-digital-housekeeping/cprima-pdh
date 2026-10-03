@@ -1,131 +1,81 @@
 """Bringing data into a vault: CSV import, import from another vault, and merging two copies of one vault.
 
-All of it runs through `txn.execute`: dry run unless `apply`, one save, reopened and verified. Reports name entries
+All of it runs through `txn.execute_vault`: dry run unless `apply`, one save, reopened and verified. Reports name entries
 and counts, never values. Merging is by UUID and modification time: the newer state wins and the replaced state is kept
 in the entry's history; nothing is deleted because the other copy lacks it.
 """
 from __future__ import annotations
 
-import base64
 import csv
-import uuid as uuidlib
 from datetime import date, datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable
+from typing import Callable
 
-from .backends.kdbx import STANDARD_ATTR
-from .entries import _root
-from .history import _state, set_otp
+from .history import _state
 from .models import ImportReport, MergeReport
-from .source import _aware, _gpath, _in_bin
-from .txn import Plan, execute, snapshot
+from .txn import Plan, execute_vault
+from .vault import EntryData, Field, GroupData, Vault, as_vault
 from .write import WriteError
-
-if TYPE_CHECKING:
-    from pykeepass import PyKeePass
 
 _COLUMNS = {  # lower-cased CSV header -> what it is
     "group": "group", "title": "title", "username": "username", "user name": "username", "user_name": "username",
     "password": "password", "url": "url", "notes": "notes", "tags": "tags", "expires": "expires", "expiry": "expires",
 }
+_EARLIEST = datetime.min.replace(tzinfo=timezone.utc)
 
 
-def _find_group(kp: PyKeePass, parts: list[str]):
-    group = kp.root_group
+def _root_id(vault: Vault) -> str:
+    return next(g.id for g in vault.groups() if g.is_root)
+
+
+def _find_group(vault: Vault, parts: list[str]) -> GroupData | None:
+    groups = vault.groups()
+    current = next(g for g in groups if g.is_root)
     for name in parts:
-        group = next((g for g in group.subgroups if g.name == name), None)
-        if group is None:
+        current = next((g for g in groups if g.parent_id == current.id and g.name == name), None)
+        if current is None:
             return None
-    return group
+    return current
 
 
-def _ensure_path(kp: PyKeePass, parts: list[str]):
-    group = kp.root_group
+def _ensure_path(vault: Vault, parts: list[str]) -> str:
+    """The id of the group at `parts` below the root, created (with its parents) when missing."""
+    current = _root_id(vault)
     for name in parts:
-        child = next((g for g in group.subgroups if g.name == name), None)
-        group = child if child is not None else kp.add_group(group, name)
-    return group
+        child = next((g for g in vault.groups() if g.parent_id == current and g.name == name), None)
+        current = child.id if child is not None else vault.add_group(current, name)
+    return current
 
 
 def _parts(path: str) -> list[str]:
     return [p for p in path.strip("/").split("/") if p]
 
 
-def _new_paths(kp: PyKeePass, wanted: set[tuple[str, ...]]) -> int:
+def _new_paths(vault: Vault, wanted: set[tuple[str, ...]]) -> int:
     """How many groups would have to be created so that every wanted path exists."""
     missing = set()
     for path in wanted:
         for i in range(1, len(path) + 1):
-            if _find_group(kp, list(path[:i])) is None:
+            if _find_group(vault, list(path[:i])) is None:
                 missing.add(path[:i])
     return len(missing)
 
 
+def _entries_in(vault: Vault, group_id: str) -> list[EntryData]:
+    return [e for e in vault.entries() if e.group_id == group_id]
+
+
 # --- one entry from one vault into another ----------------------------------------------------------------------------
 
-def copy_entry(src, dest_kp: PyKeePass, dest_group, keep_uuid: bool = False):
-    """Copy an entry (fields with their protection, tags, icon, expiry, times, attachments, look) into `dest_group`."""
-    new = dest_kp.add_entry(dest_group, src.title or "", src.username or "", src.password or "", url=src.url or None,
-                            notes=src.notes or None, tags=list(src.tags or []) or None, otp=src.otp or None,
-                            icon=src.icon, force_creation=True)
-    _copy_extras(src, new, dest_kp)
-    if keep_uuid:
-        new._element.find("UUID").text = src._element.findtext("UUID")
-    for attr in ("ctime", "mtime", "atime"):
-        value = getattr(src, attr)
-        if value is not None:
-            setattr(new, attr, value)
-    return new
-
-
-def _copy_extras(src, dest, dest_kp: PyKeePass) -> None:
-    for key, value in (src.custom_properties or {}).items():
-        dest.set_custom_property(key, value, protect=bool(src.is_custom_property_protected(key)))
-    if src.expires:
-        dest.expiry_time, dest.expires = src.expiry_time, True
-    for a in src.attachments:
-        dest.add_attachment(dest_kp.add_binary(a.data), a.filename)
-    for tag in ("ForegroundColor", "BackgroundColor", "OverrideURL"):
-        text = src._element.findtext(tag)
-        el = dest._element.find(tag)
-        if text and el is not None:
-            el.text = text
-    dest.autotype_enabled, dest.autotype_sequence = src.autotype_enabled, src.autotype_sequence
-
-
-def _overwrite(target, src, kp: PyKeePass) -> None:
-    """Make `target` look like `src` (same vault family, other copy): fields, tags, icon, expiry, attachments."""
-    for attr in ("title", "username", "password", "url", "notes"):
-        setattr(target, attr, getattr(src, attr) or "")
-    if (src.otp or None) != (target.otp or None):
-        set_otp(target, src.otp)
-    for key in list(target.custom_properties or {}):
-        if key not in (src.custom_properties or {}):
-            target.delete_custom_property(key)
-    for key, value in (src.custom_properties or {}).items():
-        target.set_custom_property(key, value, protect=bool(src.is_custom_property_protected(key)))
-    target.tags = list(src.tags or [])
-    target.icon = src.icon or "0"
-    target.expires = bool(src.expires)
-    if src.expires:
-        target.expiry_time = src.expiry_time
-    if {a.filename: a.data for a in target.attachments} != {a.filename: a.data for a in src.attachments}:
-        for a in list(target.attachments):
-            target.delete_attachment(a)
-        for a in src.attachments:
-            target.add_attachment(kp.add_binary(a.data), a.filename)
-    target.autotype_enabled, target.autotype_sequence = src.autotype_enabled, src.autotype_sequence
-    target.mtime = src.mtime
-
-
-def _live(kp: PyKeePass):
-    rb = kp.recyclebin_group
-    return [e for e in kp.entries if rb is None or not _in_bin(e.group, rb.uuid)]
+def copy_entry(src: Vault, src_entry: EntryData, dest: Vault, dest_group_id: str, keep_uuid: bool = False) -> str:
+    """Copy an entry (fields with their protection, tags, icon, expiry, times, attachments, look) into a group."""
+    content = {name: src.attachment(src_entry.id, name) for name, _ in src_entry.attachments}
+    return dest.add_entry(dest_group_id, src_entry, content, keep_id=keep_uuid, keep_times=True)
 
 
 # --- import from CSV ----------------------------------------------------------------------------------------------------
 
-def import_csv(open_db: Callable[[], PyKeePass], db: Path, file: Path, group: str, apply: bool) -> ImportReport:
+def import_csv(open_db: Callable[[], object], db: Path, file: Path, group: str, apply: bool) -> ImportReport:
     """Add the rows of a CSV file as entries below `group` (created if missing); unknown columns become custom fields."""
     try:
         with open(file, newline="", encoding="utf-8-sig") as f:
@@ -163,167 +113,145 @@ def import_csv(open_db: Callable[[], PyKeePass], db: Path, file: Path, group: st
             raise WriteError(f"the CSV has the title {row['title']!r} twice in {'/'.join(row['path']) or '/'}")
         seen.add(key)
 
-    def build(kp: PyKeePass) -> Plan:
+    def build(vault: Vault) -> Plan:
         for row in rows:
-            existing = _find_group(kp, list(row["path"]))
-            if existing is not None and any(e.title == row["title"] for e in existing.entries):
+            existing = _find_group(vault, list(row["path"]))
+            if existing is not None and any(e.title == row["title"] for e in _entries_in(vault, existing.id)):
                 raise WriteError(f"{'/'.join(row['path']) or '/'!r} already has an entry {row['title']!r}")
         report = ImportReport(kind="csv", source=str(file), entries=len(rows),
-                              groups=_new_paths(kp, {r["path"] for r in rows}), columns=custom_columns)
+                              groups=_new_paths(vault, {r["path"] for r in rows}), columns=custom_columns)
         if not rows:
             return Plan(change=report)
 
-        def mutate(k: PyKeePass) -> None:
+        def mutate(v: Vault) -> None:
             for row in rows:
-                g = _ensure_path(k, list(row["path"]))
-                e = k.add_entry(g, row["title"], row.get("username", ""), row.get("password", ""),
-                                url=row.get("url") or None, notes=row.get("notes") or None,
-                                tags=[t for t in row.get("tags", "").split(";") if t.strip()] or None)
-                for name, value in row["custom"].items():
-                    e.set_custom_property(name, value)
-                if "day" in row:
-                    e.expiry_time, e.expires = datetime(row["day"].year, row["day"].month, row["day"].day,
-                                                        tzinfo=timezone.utc), True
+                day = row.get("day")
+                data = EntryData(
+                    id="", group_path="", title=row["title"], username=row.get("username", ""),
+                    password=row.get("password", ""), url=row.get("url") or "", notes=row.get("notes") or "",
+                    tags=tuple(t for t in row.get("tags", "").split(";") if t.strip()),
+                    fields={n: Field(value, False) for n, value in row["custom"].items()},
+                    expires=day is not None,
+                    expiry=datetime(day.year, day.month, day.day, tzinfo=timezone.utc) if day is not None else None)
+                v.add_entry(_ensure_path(v, list(row["path"])), data)
 
-        def verify(again: PyKeePass) -> list[str]:
+        def verify(again: Vault) -> list[str]:
             for row in rows:
                 g = _find_group(again, list(row["path"]))
-                if g is None or sum(1 for e in g.entries if e.title == row["title"]) != 1:
+                if g is None or sum(1 for e in _entries_in(again, g.id) if e.title == row["title"]) != 1:
                     return ["an imported entry is missing"]
             return []
 
         return Plan(change=report, mutate=mutate, count_delta=len(rows), verify=verify)
 
-    return execute(open_db, db, build, apply)
+    return execute_vault(open_db, db, build, apply)
 
 
 # --- import from another vault -----------------------------------------------------------------------------------------------
 
-def import_vault(open_db: Callable[[], PyKeePass], db: Path, other: PyKeePass, source: str, group: str,
-                 apply: bool) -> ImportReport:
+def import_vault(open_db: Callable[[], object], db: Path, other, source: str, group: str, apply: bool) -> ImportReport:
     """Copy the live entries of another vault, with their group structure, below `group` (new UUIDs)."""
-    rb = other.recyclebin_group
-    groups = [g for g in other.groups if not g.is_root_group and (rb is None or not _in_bin(g, rb.uuid))]
-    entries = _live(other)
+    src = as_vault(other)
+    groups = [g for g in src.groups() if not g.is_root and not g.is_bin and not g.in_bin]
+    entries = [e for e in src.entries() if not e.in_bin]
 
-    def relative(g) -> list[str]:
-        return list(g.path or [])
-
-    def build(kp: PyKeePass) -> Plan:
+    def build(vault: Vault) -> Plan:
         base = _parts(group)
-        wanted = {tuple(base + relative(e.group)) for e in entries}
-        report = ImportReport(kind="vault", source=source, entries=len(entries), groups=_new_paths(kp, wanted), columns=[])
+        wanted = {tuple(base + _parts(e.group_path)) for e in entries}
+        report = ImportReport(kind="vault", source=source, entries=len(entries), groups=_new_paths(vault, wanted),
+                              columns=[])
         if not entries:
             return Plan(change=report)
 
-        def mutate(k: PyKeePass) -> None:
+        def mutate(v: Vault) -> None:
             for g in groups:
-                _ensure_path(k, base + relative(g))
-            _ensure_path(k, base)
+                _ensure_path(v, base + _parts(g.path))
+            _ensure_path(v, base)
             for e in entries:
-                copy_entry(e, k, _ensure_path(k, base + relative(e.group)))
+                copy_entry(src, e, v, _ensure_path(v, base + _parts(e.group_path)))
 
-        def verify(again: PyKeePass) -> list[str]:
-            count = sum(1 for x in again.entries if "/".join(x.group.path or []).startswith("/".join(base)))
+        def verify(again: Vault) -> list[str]:
+            prefix = "/".join(base)
+            count = sum(1 for x in again.entries() if x.group_path.strip("/").startswith(prefix))
             return [] if count >= len(entries) else ["fewer entries than planned were imported"]
 
         return Plan(change=report, mutate=mutate, count_delta=len(entries), verify=verify)
 
-    return execute(open_db, db, build, apply)
+    return execute_vault(open_db, db, build, apply)
 
 
 # --- merge two copies of one vault -----------------------------------------------------------------------------------------
 
-def _location_changed(kp: PyKeePass, e) -> datetime | None:
-    text = e._element.findtext("Times/LocationChanged")
-    return _aware(kp._decode_time(text)) if text else None
+def _group_like(vault: Vault, other_groups: dict[str, GroupData], gid: str) -> str:
+    """The local group with the other copy's group id; created (same id, same place) when missing."""
+    local = {g.id for g in vault.groups()}
+    if gid in local:
+        return gid
+    src = other_groups[gid]
+    parent = src.parent_id
+    parent_id = _root_id(vault) if parent is None or other_groups[parent].is_root else _group_like(vault, other_groups, parent)
+    return vault.add_group(parent_id, src.name, icon=src.icon, notes=src.notes, keep_id=gid)
 
 
-def _deleted_uuids(kp: PyKeePass) -> set[str]:
-    out = set()
-    for el in _root(kp).findall("Root/DeletedObjects/DeletedObject/UUID"):
-        try:
-            out.add(str(uuidlib.UUID(bytes=base64.b64decode(el.text))))
-        except (ValueError, TypeError):
-            continue
-    return out
-
-
-def _group_like(kp: PyKeePass, src_group):
-    """The local group with the other copy's group UUID; created (same UUID, same place) when missing."""
-    local = next((g for g in kp.groups if g.uuid == src_group.uuid), None)
-    if local is not None:
-        return local
-    parent = kp.root_group if src_group.parentgroup is None or src_group.parentgroup.is_root_group \
-        else _group_like(kp, src_group.parentgroup)
-    made = kp.add_group(parent, src_group.name, icon=src_group.icon, notes=src_group.notes)
-    made._element.find("UUID").text = src_group._element.findtext("UUID")
-    return made
-
-
-def merge_vaults(open_db: Callable[[], PyKeePass], db: Path, open_other: Callable[[], PyKeePass], source: str,
+def merge_vaults(open_db: Callable[[], object], db: Path, open_other: Callable[[], object], source: str,
                  apply: bool) -> MergeReport:
     """Merge another copy of this vault: add what is missing, take newer states, follow moves. Deletes nothing."""
 
-    def build(kp: PyKeePass) -> Plan:
-        other = open_other()
-        local = {str(e.uuid): e for e in kp.entries}
-        rb_local, rb_other = kp.recyclebin_group, other.recyclebin_group
-        gone = _deleted_uuids(kp)
+    def build(vault: Vault) -> Plan:
+        other = as_vault(open_other())
+        local = {e.id: e for e in vault.entries()}
+        gone = vault.deleted_ids()
         add, update, move, trash = [], [], [], []
         unchanged = skipped = 0
-        for src in other.entries:
-            uid = str(src.uuid)
-            in_other_bin = rb_other is not None and _in_bin(src.group, rb_other.uuid)
-            mine = local.get(uid)
+        for src in other.entries():
+            mine = local.get(src.id)
             if mine is None:
-                if in_other_bin or uid in gone:
+                if src.in_bin or src.id in gone:
                     skipped += 1
                 else:
                     add.append(src)
                 continue
-            mine_in_bin = rb_local is not None and _in_bin(mine.group, rb_local.uuid)
-            theirs_newer_place = (_location_changed(other, src) or datetime.min.replace(tzinfo=timezone.utc)) > \
-                                 (_location_changed(kp, mine) or datetime.min.replace(tzinfo=timezone.utc))
-            if in_other_bin and not mine_in_bin and theirs_newer_place:
+            theirs_newer_place = (src.location_changed or _EARLIEST) > (mine.location_changed or _EARLIEST)
+            if src.in_bin and not mine.in_bin and theirs_newer_place:
                 trash.append(mine)
                 continue
-            if not in_other_bin and theirs_newer_place and mine.group.uuid != src.group.uuid:
+            if not src.in_bin and theirs_newer_place and mine.group_id != src.group_id:
                 move.append((src, mine))
-            if _state(src) != _state(mine) and (_aware(src.mtime) or datetime.min.replace(tzinfo=timezone.utc)) > \
-                    (_aware(mine.mtime) or datetime.min.replace(tzinfo=timezone.utc)):
+            if _state(src) != _state(mine) and (src.mtime or _EARLIEST) > (mine.mtime or _EARLIEST):
                 update.append((src, mine))
             elif _state(src) == _state(mine) and not (move and move[-1][1] is mine):
                 unchanged += 1
         report = MergeReport(source=source, added=len(add), updated=len(update), moved=len(move), trashed=len(trash),
                              unchanged=unchanged, skipped=skipped,
-                             entries=sorted({f"{_gpath(e.group)}/{e.title}" for e in
-                                             [*add, *(m for _, m in update), *(m for _, m in move), *trash]}))
+                             entries=sorted({e.path for e in [*add, *(m for _, m in update), *(m for _, m in move), *trash]}))
         if not (add or update or move or trash):
             return Plan(change=report)
-        touched = {str(m.uuid) for _, m in update} | {str(m.uuid) for _, m in move} | {str(m.uuid) for m in trash}
-        add_ids = [str(s.uuid) for s in add]
-        update_ids = [(str(s.uuid), str(m.uuid)) for s, m in update]
-        move_ids = [(str(s.uuid), str(m.uuid)) for s, m in move]
-        trash_ids = [str(m.uuid) for m in trash]
+        touched = {m.id for _, m in update} | {m.id for _, m in move} | {m.id for m in trash}
+        src_by = {e.id: e for e in other.entries()}
+        other_groups = {g.id: g for g in other.groups()}
+        add_ids = [s.id for s in add]
+        update_ids = [(s.id, m.id) for s, m in update]
+        move_ids = [(s.id, m.id) for s, m in move]
+        trash_ids = [m.id for m in trash]
 
-        def mutate(k: PyKeePass) -> None:
-            by_uid = {str(e.uuid): e for e in k.entries}
-            src_by = {str(e.uuid): e for e in other.entries}
+        def content(s: EntryData) -> dict[str, bytes]:
+            return {name: other.attachment(s.id, name) for name, _ in s.attachments}
+
+        def mutate(v: Vault) -> None:
             for _s, m in update_ids:
-                snapshot(by_uid[m])
+                v.snapshot_history(m)
             for s, m in update_ids:
-                _overwrite(by_uid[m], src_by[s], k)
+                v.overwrite_entry(m, src_by[s], content(src_by[s]), keep_mtime=True)
             for s, m in move_ids:
-                k.move_entry(by_uid[m], _group_like(k, src_by[s].group))
+                v.move_entry(m, _group_like(v, other_groups, src_by[s].group_id))
             for m in trash_ids:
-                k.trash_entry(by_uid[m])
+                v.trash_entry(m)
             for s in add_ids:
-                copy_entry(src_by[s], k, _group_like(k, src_by[s].group), keep_uuid=True)
+                v.add_entry(_group_like(v, other_groups, src_by[s].group_id), src_by[s], content(src_by[s]),
+                            keep_id=True, keep_times=True)
 
-        def verify(again: PyKeePass) -> list[str]:
-            got = {str(e.uuid): e for e in again.entries}
-            src_by = {str(e.uuid): e for e in other.entries}
+        def verify(again: Vault) -> list[str]:
+            got = {e.id: e for e in again.entries()}
             problems = []
             for s in add_ids:
                 if s not in got or _state(got[s]) != _state(src_by[s]):
@@ -332,11 +260,11 @@ def merge_vaults(open_db: Callable[[], PyKeePass], db: Path, open_other: Callabl
                 if m not in got or _state(got[m]) != _state(src_by[s]):
                     problems.append("an updated entry does not match the other copy")
             for s, m in move_ids:
-                if m not in got or got[m].group.uuid != src_by[s].group.uuid:
+                if m not in got or got[m].group_id != src_by[s].group_id:
                     problems.append("a moved entry is not where the other copy has it")
             return problems
 
         return Plan(change=report, mutate=mutate, touched=touched, count_delta=len(add), verify=verify,
                     stamp="none")  # the entries keep the times of the copy they come from
 
-    return execute(open_db, db, build, apply)
+    return execute_vault(open_db, db, build, apply)

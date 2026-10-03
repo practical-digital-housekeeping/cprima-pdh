@@ -2,27 +2,26 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable
+from typing import Callable
 
 from .models import AttachmentItem, AttachmentsReport, OrgChange
-from .txn import Plan, execute, snapshot
-from .write import WriteError, find_entry
-
-if TYPE_CHECKING:
-    from pykeepass import PyKeePass
+from .txn import Plan, execute_vault
+from .vault import Vault, as_vault, require
+from .write import WriteError, find_data
 
 
-def _contents(entry) -> dict[str, bytes]:
-    return {a.filename: a.data for a in entry.attachments}
+def _contents(vault: Vault, eid: str, names) -> dict[str, bytes]:
+    return {name: vault.attachment(eid, name) for name, _ in names}
 
 
-def attachments_report(kp: PyKeePass, path: str, username: str | None = None) -> AttachmentsReport:
-    e = find_entry(kp, path, username)
-    return AttachmentsReport(entry=path, attachments=[AttachmentItem(name=a.filename, size=len(a.data))
-                                                       for a in e.attachments])
+def attachments_report(source, path: str, username: str | None = None) -> AttachmentsReport:
+    vault = as_vault(source)
+    require(vault, "attachments")
+    e = find_data(vault, path, username)
+    return AttachmentsReport(entry=path, attachments=[AttachmentItem(name=n, size=s) for n, s in e.attachments])
 
 
-def attach_file(open_db: Callable[[], PyKeePass], db: Path, path: str, file: Path, apply: bool,
+def attach_file(open_db: Callable[[], object], db: Path, path: str, file: Path, apply: bool,
                 name: str | None = None, username: str | None = None) -> OrgChange:
     """Attach a file to an entry under `name` (default: the file's own name)."""
     try:
@@ -31,55 +30,52 @@ def attach_file(open_db: Callable[[], PyKeePass], db: Path, path: str, file: Pat
         raise WriteError(f"cannot read {file}: {exc.strerror or exc}") from exc
     label = name or Path(file).name
 
-    def build(kp: PyKeePass) -> Plan:
-        e = find_entry(kp, path, username)
-        if label in _contents(e):
+    def build(vault: Vault) -> Plan:
+        require(vault, "attachments")
+        e = find_data(vault, path, username)
+        if any(n == label for n, _ in e.attachments):
             raise WriteError(f"{path!r} already has an attachment named {label!r}")
-        uid, others = str(e.uuid), _contents(e)
+        uid, others = e.id, _contents(vault, e.id, e.attachments)
         change = OrgChange(kind="attach", target=path, dest=label)
 
-        def mutate(k: PyKeePass) -> None:
-            target = next(x for x in k.entries if str(x.uuid) == uid)
-            snapshot(target)
-            target.add_attachment(k.add_binary(content), label)
+        def mutate(v: Vault) -> None:
+            v.snapshot_history(uid)
+            v.attach(uid, label, content)
 
-        def verify(again: PyKeePass) -> list[str]:
-            x = next((y for y in again.entries if str(y.uuid) == uid), None)
-            if x is None or _contents(x) != {**others, label: content}:
+        def verify(again: Vault) -> list[str]:
+            x = next((y for y in again.entries() if y.id == uid), None)
+            if x is None or _contents(again, uid, x.attachments) != {**others, label: content}:
                 return ["the attachments are not as planned"]
             return []
 
         return Plan(change=change, mutate=mutate, touched={uid}, verify=verify)
 
-    return execute(open_db, db, build, apply)
+    return execute_vault(open_db, db, build, apply)
 
 
-def detach_file(open_db: Callable[[], PyKeePass], db: Path, path: str, name: str, apply: bool,
+def detach_file(open_db: Callable[[], object], db: Path, path: str, name: str, apply: bool,
                 username: str | None = None) -> OrgChange:
     """Remove one attachment from an entry; its content goes too when no other entry uses it."""
 
-    def build(kp: PyKeePass) -> Plan:
-        e = find_entry(kp, path, username)
-        have = _contents(e)
+    def build(vault: Vault) -> Plan:
+        require(vault, "attachments")
+        e = find_data(vault, path, username)
+        have = _contents(vault, e.id, e.attachments)
         if name not in have:
             raise WriteError(f"{path!r} has no attachment named {name!r}")
-        uid = str(e.uuid)
+        uid = e.id
         left = {k: v for k, v in have.items() if k != name}
         change = OrgChange(kind="detach", target=path, dest=name)
 
-        def mutate(k: PyKeePass) -> None:
-            target = next(x for x in k.entries if str(x.uuid) == uid)
-            snapshot(target)
-            att = next(a for a in target.attachments if a.filename == name)
-            ident = att.id
-            target.delete_attachment(att)
-            if not any(a.id == ident for x in k.entries for a in x.attachments):
-                k.delete_binary(ident)
+        def mutate(v: Vault) -> None:
+            v.snapshot_history(uid)
+            v.detach(uid, name)
 
-        def verify(again: PyKeePass) -> list[str]:
-            x = next((y for y in again.entries if str(y.uuid) == uid), None)
-            return [] if x is not None and _contents(x) == left else ["the attachments are not as planned"]
+        def verify(again: Vault) -> list[str]:
+            x = next((y for y in again.entries() if y.id == uid), None)
+            ok = x is not None and _contents(again, uid, x.attachments) == left
+            return [] if ok else ["the attachments are not as planned"]
 
         return Plan(change=change, mutate=mutate, touched={uid}, verify=verify)
 
-    return execute(open_db, db, build, apply)
+    return execute_vault(open_db, db, build, apply)

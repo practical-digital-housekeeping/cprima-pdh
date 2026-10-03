@@ -10,15 +10,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable
 
-from .models import FixAction, FixPlan
 from .backends.kdbx import OTP_PREFIXES, STANDARD_ATTR
-from .schema import SchemaSet, _bind, lookup_term, vocabulary_index
-from .source import _gpath, _in_bin
-from .write import WriteError, find_entry
+from .models import FixAction, FixPlan
+from .schema import SchemaSet, lookup_term, vocabulary_index
+from .validation import live
+from .vault import EntryData, Vault, as_vault
+from .write import WriteError, find_data
 
 if TYPE_CHECKING:
-    from pykeepass import PyKeePass
-
     from .txn import Plan
 
 _RESERVED = tuple(STANDARD_ATTR)  # the standard fields: not custom fields, so never renamed or treated as one
@@ -26,24 +25,20 @@ _RESERVED = tuple(STANDARD_ATTR)  # the standard fields: not custom fields, so n
 
 @dataclass
 class _Op:
-    entry: object
+    entry: EntryData
     ref: str
     key: str
     target: str  # new key name (== key when only the protection changes)
     protect: bool  # protection flag the field must end up with
 
 
-def _protected(e, key: str) -> bool:
-    return bool(e._element.xpath("boolean(String[Key=$k]/Value[@Protected='True'])", k=key))
-
-
-def _plan(kp: PyKeePass, sset: SchemaSet, renames: bool, protection: bool) -> tuple[list[_Op], list[FixAction]]:
+def _plan(source, sset: SchemaSet, renames: bool, protection: bool) -> tuple[list[_Op], list[FixAction]]:
     exact, matchers = vocabulary_index(sset.fields)
     ops: list[_Op] = []
     actions: list[FixAction] = []
-    for e, path, _names, _unknown in _bind(kp, sset):
-        ref = f"{path}/{e.title}"
-        keys = [k for k in (e.custom_properties or {}) if not k.startswith(OTP_PREFIXES)]
+    for e in live(as_vault(source).entries()):
+        ref = f"{e.group_path}/{e.title}"
+        keys = [k for k in e.fields if not k.startswith(OTP_PREFIXES)]
         existing = set(keys)
         for key in keys:
             found = lookup_term(key, exact, matchers)
@@ -58,7 +53,7 @@ def _plan(kp: PyKeePass, sset: SchemaSet, renames: bool, protection: bool) -> tu
                     target = name
                     existing.discard(key)
                     existing.add(name)
-            now = _protected(e, key)
+            now = e.fields[key].protected
             want = now
             if protection and ft.protected is not None:
                 want = ft.protected
@@ -76,14 +71,10 @@ def _digest(*parts: str | None) -> str:
     return hashlib.sha256("\x1f".join(p or "" for p in parts).encode()).hexdigest()
 
 
-def _base(e, with_group: bool = True) -> str:
-    """Everything about an entry except its custom fields (and, optionally, its group)."""
-    return _digest(e.title, e.username, e.password, e.url, e.notes, e.otp, ",".join(sorted(e.tags or [])),
-                   str(e.expires), str(e.group.uuid) if with_group else "")  # not expiry_time: saved without sub-second precision
-
-
-def _custom(e) -> str:
-    return _digest(repr(sorted((e.custom_properties or {}).items())))
+def _base(e: EntryData) -> str:
+    """Everything about an entry except its custom fields."""
+    return _digest(e.title, e.username, e.password, e.url, e.notes, e.otp, ",".join(sorted(e.tags)),
+                   str(e.expires), e.group_id)  # not the expiry time: saved without sub-second precision
 
 
 def _plan_result(actions: list[FixAction], touched: int, applied: bool) -> FixPlan:
@@ -96,43 +87,43 @@ def _plan_result(actions: list[FixAction], touched: int, applied: bool) -> FixPl
 
 def _plan_from_ops(ops: list[_Op], actions: list[FixAction]) -> "Plan":
     """A `txn.Plan` for field renames and protection changes: history snapshot per touched entry, then the changes."""
-    from .txn import Plan, snapshot
+    from .txn import Plan
 
-    touched = {str(o.entry.uuid) for o in ops}
+    touched = {o.entry.id for o in ops}
     report = _plan_result(actions, len(touched), False)
     if not ops:
         return Plan(change=report)
     expect: dict[str, dict] = {}  # what every touched entry must look like after saving
     for o in ops:
-        value = o.entry.get_custom_property(o.key) or ""  # kept in memory, never reported
-        exp = expect.setdefault(str(o.entry.uuid), {"base": _base(o.entry), "fields": {}, "gone": set()})
+        value = o.entry.fields[o.key].value  # kept in memory, never reported
+        exp = expect.setdefault(o.entry.id, {"base": _base(o.entry), "fields": {}, "gone": set()})
         exp["fields"][o.target] = (_digest(value), o.protect)
         if o.target != o.key:
             exp["gone"].add(o.key)
 
-    def mutate(_kp: PyKeePass) -> None:
-        for entry in {str(o.entry.uuid): o.entry for o in ops}.values():
-            snapshot(entry)
+    def mutate(v: Vault) -> None:
+        for uid in touched:
+            v.snapshot_history(uid)
         for o in ops:
-            value = o.entry.get_custom_property(o.key) or ""
+            value = o.entry.fields[o.key].value
             if o.target != o.key:
-                o.entry.delete_custom_property(o.key)
-            o.entry.set_custom_property(o.target, value, protect=o.protect)
+                v.delete_field(o.entry.id, o.key)
+            v.set_field(o.entry.id, o.target, value, protect=o.protect)
 
-    def verify(again: PyKeePass) -> list[str]:
+    def verify(again: Vault) -> list[str]:
         problems: list[str] = []
-        entries = {str(e.uuid): e for e in again.entries}
+        entries = {e.id: e for e in again.entries()}
         for uid, exp in expect.items():
             e = entries.get(uid)
             if e is None or _base(e) != exp["base"]:
                 problems.append("a touched entry changed outside its custom fields")
                 continue
-            props = e.custom_properties or {}
             for key, (vdigest, prot) in exp["fields"].items():
-                if key not in props or _digest(props[key]) != vdigest or _protected(e, key) != prot:
+                got = e.fields.get(key)
+                if got is None or _digest(got.value) != vdigest or got.protected != prot:
                     problems.append("a field does not have the expected name, value or protection")
                     break
-            if exp["gone"] & set(props):
+            if exp["gone"] & set(e.fields):
                 problems.append("a renamed field still exists under its old name")
         return problems
 
@@ -140,20 +131,20 @@ def _plan_from_ops(ops: list[_Op], actions: list[FixAction]) -> "Plan":
 
 
 def run_fix(
-    open_db: Callable[[], PyKeePass],
+    open_db: Callable[[], object],
     db: Path,
     sset: SchemaSet,
     apply: bool,
     renames: bool = True,
     protection: bool = True,
 ) -> FixPlan:
-    """Apply the vocabulary to every entry: canonical names and fixed protection (see `txn.execute`)."""
-    from .txn import execute
+    """Apply the vocabulary to every entry: canonical names and fixed protection (see `txn.execute_vault`)."""
+    from .txn import execute_vault
 
-    def build(kp: PyKeePass):
-        return _plan_from_ops(*_plan(kp, sset, renames, protection))
+    def build(vault: Vault):
+        return _plan_from_ops(*_plan(vault, sset, renames, protection))
 
-    return execute(open_db, db, build, apply)
+    return execute_vault(open_db, db, build, apply)
 
 
 def _check_names(old: str, new: str) -> None:
@@ -164,37 +155,34 @@ def _check_names(old: str, new: str) -> None:
             raise WriteError(f"{name!r} is a standard or OTP field; only custom fields can be renamed")
 
 
-def _plan_rename_all(kp: PyKeePass, old: str, new: str, under: str | None) -> tuple[list[_Op], list[FixAction]]:
+def _plan_rename_all(source, old: str, new: str, under: str | None) -> tuple[list[_Op], list[FixAction]]:
     _check_names(old, new)
     prefix = (under or "").strip("/")
-    rb = kp.recyclebin_group
-    bin_uuid = rb.uuid if rb is not None else None
     ops: list[_Op] = []
     actions: list[FixAction] = []
-    for e in kp.entries:
-        props = e.custom_properties or {}
-        path = _gpath(e.group)
-        if old not in props or _in_bin(e.group, bin_uuid):
+    for e in live(as_vault(source).entries()):
+        path = e.group_path
+        if old not in e.fields:
             continue
         if prefix and path != prefix and not path.startswith(prefix + "/"):
             continue
         ref = f"{path}/{e.title}"
-        if new in props:
+        if new in e.fields:
             actions.append(FixAction(entry=ref, key=old, action=f"skipped: {new} already exists", new_key=new))
             continue
-        ops.append(_Op(entry=e, ref=ref, key=old, target=new, protect=_protected(e, old)))
+        ops.append(_Op(entry=e, ref=ref, key=old, target=new, protect=e.fields[old].protected))
         actions.append(FixAction(entry=ref, key=old, action="rename", new_key=new))
     return ops, actions
 
 
-def plan_rename_all(kp: PyKeePass, old: str, new: str, under: str | None = None) -> FixPlan:
+def plan_rename_all(source, old: str, new: str, under: str | None = None) -> FixPlan:
     """What `rename_field_all` would do, without writing: every live entry that has `old` (below `under`, if given)."""
-    ops, actions = _plan_rename_all(kp, old, new, under)
+    ops, actions = _plan_rename_all(source, old, new, under)
     return _plan_result(actions, len(ops), False)
 
 
 def rename_field_all(
-    open_db: Callable[[], PyKeePass],
+    open_db: Callable[[], object],
     db: Path,
     old: str,
     new: str,
@@ -202,13 +190,13 @@ def rename_field_all(
     under: str | None = None,
 ) -> FixPlan:
     """Rename one custom field on every live entry that has it, keeping value and protection. One save, verified."""
-    from .txn import execute
+    from .txn import execute_vault
 
-    return execute(open_db, db, lambda kp: _plan_from_ops(*_plan_rename_all(kp, old, new, under)), apply)
+    return execute_vault(open_db, db, lambda v: _plan_from_ops(*_plan_rename_all(v, old, new, under)), apply)
 
 
 def rename_field(
-    open_db: Callable[[], PyKeePass],
+    open_db: Callable[[], object],
     db: Path,
     path: str,
     old: str,
@@ -217,17 +205,16 @@ def rename_field(
     username: str | None = None,
 ) -> FixPlan:
     """Rename one custom field on one entry, keeping its value and protection."""
-    from .txn import execute
+    from .txn import execute_vault
 
-    def build(kp: PyKeePass):
-        e = find_entry(kp, path, username)
-        props = e.custom_properties or {}
+    def build(vault: Vault):
+        e = find_data(vault, path, username)
         _check_names(old, new)
-        if old not in props:
+        if old not in e.fields:
             raise WriteError(f"{path!r} has no custom field {old!r}")
-        if new in props:
+        if new in e.fields:
             raise WriteError(f"{new!r} already exists on {path!r}")
-        return _plan_from_ops([_Op(entry=e, ref=path, key=old, target=new, protect=_protected(e, old))],
+        return _plan_from_ops([_Op(entry=e, ref=path, key=old, target=new, protect=e.fields[old].protected)],
                               [FixAction(entry=path, key=old, action="rename", new_key=new)])
 
-    return execute(open_db, db, build, apply)
+    return execute_vault(open_db, db, build, apply)

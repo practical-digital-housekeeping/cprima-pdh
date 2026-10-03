@@ -63,6 +63,13 @@ class EntryData:
     history_bytes: int = 0
     # the standard fields the store keeps protected (KeePass: normally Password and otp, but the file decides)
     protected_standard: frozenset[str] = frozenset({"Password", "otp"})
+    # how a client shows and treats the entry (KeePass only; empty elsewhere)
+    fg_color: str = ""
+    bg_color: str = ""
+    override_url: str = ""
+    autotype_enabled: bool | None = None
+    autotype_sequence: str = ""
+    location_changed: datetime | None = None  # when it was last moved (or trashed); merges decide by it
 
     @property
     def path(self) -> str:

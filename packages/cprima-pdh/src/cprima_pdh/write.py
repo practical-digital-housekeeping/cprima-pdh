@@ -3,15 +3,12 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable
+from typing import Callable
 
 from .backends.kdbx import STANDARD_ATTR, STANDARD_PROTECTED
 from .models import Change
 from .schema import make_ref, uuid_key
-from .source import _gpath
-
-if TYPE_CHECKING:
-    from pykeepass import PyKeePass
+from .vault import Vault, as_vault
 
 _HIDDEN = "(hidden)"
 
@@ -20,53 +17,36 @@ class WriteError(Exception):
     pass
 
 
-def find_entry(kp: PyKeePass, path: str, username: str | None = None):
-    """The single entry whose `group/path/title` equals path (as printed by validate).
-
-    `username` narrows down entries that share the same path.
-    """
-    hits = [e for e in kp.entries if f"{_gpath(e.group)}/{e.title}" == path]
-    if username is not None:
-        hits = [e for e in hits if (e.username or "") == username]
-    if not hits:
-        raise WriteError(f"no entry at {path!r}" + (f" with username {username!r}" if username else ""))
-    if len(hits) > 1:
-        raise WriteError(f"{len(hits)} entries at {path!r}; narrow it down with --username or rename one")
-    return hits[0]
+def find_data(vault, path: str, username: str | None = None):
+    """The snapshot of the single entry at `group/path/title` (narrowed by user name) in a vault."""
+    try:
+        return vault.find_entry(path, username)
+    except KeyError as exc:
+        raise WriteError(exc.args[0]) from None
+    except LookupError as exc:
+        raise WriteError(str(exc).replace("a user name", "--username")) from None
 
 
-def effective_protection(e, field: str, protect: bool, unprotect: bool = False) -> bool:
-    """Whether the field ends up protected: asked for, else asked against, else as it already is.
-
-    Setting a custom field replaces its XML element, so the flag has to be carried over explicitly; otherwise every
-    edit of a protected field would silently unprotect it."""
+def protection_of(e, field: str, protect: bool, unprotect: bool = False) -> bool:
+    """`effective_protection` for an entry snapshot: asked for, else asked against, else as it already is."""
     if field in STANDARD_ATTR:
         return field in STANDARD_PROTECTED
     if protect:
         return True
     if unprotect:
         return False
-    return bool(e._element.xpath("boolean(String[Key=$k]/Value[@Protected='True'])", k=field))
+    return e.is_protected(field)
 
 
-def _get(e, field: str) -> str:
-    if field in STANDARD_ATTR:
-        return getattr(e, STANDARD_ATTR[field]) or ""
-    return e.get_custom_property(field) or ""
-
-
-def _put(e, field: str, value: str, protect: bool) -> None:
-    if field in STANDARD_ATTR:
-        setattr(e, STANDARD_ATTR[field], value)
-    else:
-        e.set_custom_property(field, value, protect=protect)
+def _value(e, field: str) -> str:
+    return e.value(field) if field in STANDARD_ATTR else (e.fields[field].value if field in e.fields else "")
 
 
 def plan_set(
-    kp: PyKeePass,
+    source,
     path: str,
     field: str,
-    value: str | Callable[[PyKeePass], str],
+    value: str | Callable[[Vault], str],
     overwrite: bool,
     protect: bool,
     username: str | None = None,
@@ -74,11 +54,12 @@ def plan_set(
 ) -> Change:
     if protect and unprotect:
         raise WriteError("--protect and --unprotect exclude each other")
+    vault = as_vault(source)
     if callable(value):  # a value that needs the opened database, such as a link to another entry
-        value = value(kp)
-    e = find_entry(kp, path, username)
-    old = _get(e, field)
-    hide = effective_protection(e, field, protect, unprotect)
+        value = value(vault)
+    e = find_data(vault, path, username)
+    old = _value(e, field)
+    hide = protection_of(e, field, protect, unprotect)
     shown = (lambda v: _HIDDEN if v and hide else v)
     if old == value:
         action = "unchanged"
@@ -99,7 +80,7 @@ def _lock_files(db: Path) -> list[Path]:
 
 
 def apply_set(
-    open_db: Callable[[], PyKeePass],
+    open_db: Callable[[], object],
     db: Path,
     path: str,
     field: str,
@@ -109,48 +90,48 @@ def apply_set(
     username: str | None = None,
     unprotect: bool = False,
 ) -> Change:
-    """Set one field on one entry: history snapshot, one save, reopened and verified (see `txn.execute`)."""
-    from .txn import Plan, execute, snapshot
+    """Set one field on one entry: history snapshot, one save, reopened and verified (see `txn.execute_vault`)."""
+    from .txn import Plan, execute_vault
 
-    def build(kp: PyKeePass) -> Plan:
-        wanted = value(kp) if callable(value) else value
-        change = plan_set(kp, path, field, wanted, overwrite, protect, username, unprotect)
+    def build(vault: Vault) -> Plan:
+        wanted = value(vault) if callable(value) else value
+        change = plan_set(vault, path, field, wanted, overwrite, protect, username, unprotect)
         if change.action != "set":
             return Plan(change=change)
-        e = find_entry(kp, path, username)
-        uid = str(e.uuid)
-        keep = effective_protection(e, field, protect, unprotect)
+        e = find_data(vault, path, username)
+        uid = e.id
+        keep = protection_of(e, field, protect, unprotect)
 
-        def mutate(k: PyKeePass) -> None:
-            target = next(x for x in k.entries if str(x.uuid) == uid)
-            snapshot(target)
-            _put(target, field, wanted, keep)
+        def mutate(v: Vault) -> None:
+            v.snapshot_history(uid)
+            v.set_field(uid, field, wanted, protect=keep)
 
-        def verify(again: PyKeePass) -> list[str]:
-            target = next((x for x in again.entries if str(x.uuid) == uid), None)  # by uuid: Title changes the path
-            if target is None or _get(target, field) != wanted:
+        def verify(again: Vault) -> list[str]:
+            target = next((x for x in again.entries() if x.id == uid), None)  # by id: Title changes the path
+            if target is None or _value(target, field) != wanted:
                 return [f"{field} not set as expected"]
-            if field not in STANDARD_ATTR and bool(target.is_custom_property_protected(field)) != keep:
+            if field not in STANDARD_ATTR and target.is_protected(field) != keep:
                 return [f"{field} does not have the expected protection"]
             return []
 
         return Plan(change=change, mutate=mutate, touched={uid}, verify=verify)
 
-    return execute(open_db, db, build, True)  # the caller decided to write
+    return execute_vault(open_db, db, build, True)  # the caller decided to write
 
 
-def _link_value(kp: PyKeePass, account: str, target: str, plain: bool, account_username: str | None,
+def _link_value(source, account: str, target: str, plain: bool, account_username: str | None,
                 target_username: str | None) -> str:
     """The value to store in the link field: a KeePass reference to the target by UUID (or the bare UUID)."""
-    t = find_entry(kp, target, target_username)
-    a = find_entry(kp, account, account_username)
-    if str(t.uuid) == str(a.uuid):
+    vault = as_vault(source)
+    t = find_data(vault, target, target_username)
+    a = find_data(vault, account, account_username)
+    if t.id == a.id:
         raise WriteError("an entry cannot link to itself")
-    return uuid_key(t.uuid) if plain else make_ref(t.uuid)
+    return uuid_key(t.id) if plain else make_ref(t.id)
 
 
 def plan_link(
-    kp: PyKeePass,
+    kp,
     account: str,
     target: str,
     field: str = "device",
@@ -165,7 +146,7 @@ def plan_link(
 
 
 def apply_link(
-    open_db: Callable[[], PyKeePass],
+    open_db: Callable[[], object],
     db: Path,
     account: str,
     target: str,
@@ -178,6 +159,6 @@ def apply_link(
     """Write the link, with the same safeguards as `set` (lock file, change detection, verification)."""
     return apply_set(
         open_db, db, account, field,
-        lambda kp: _link_value(kp, account, target, plain, account_username, target_username),
+        lambda vault: _link_value(vault, account, target, plain, account_username, target_username),
         overwrite, False, account_username,
     )
