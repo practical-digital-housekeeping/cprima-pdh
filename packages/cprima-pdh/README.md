@@ -29,6 +29,9 @@ pykeepass; the method commands (`pdh method ...`) work without it.
 | `pdh method` | `show`, `schemas`: the taxonomy, no vault needed |
 | `pdh backends` | installed backends |
 
+Planned, present in `--help` as `(planned)` and exiting with code 3 until built: `pdh serve` (a local, token-protected,
+read-only HTTP API for one-time-password codes and secret-free entry data; loopback only).
+
 Every vault function a GUI client offers is a command; what pdh does not do is auto-type, browser integration and
 the graphical UI itself. KDBX 3 to 4 conversion is not offered (pykeepass cannot convert).
 

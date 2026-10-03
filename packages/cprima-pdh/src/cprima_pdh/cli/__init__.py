@@ -19,7 +19,7 @@ from .. import source as source_mod
 from ..models import BackendList, BackendRow
 from ..render import Format
 from . import _common as c
-from . import check, db, edit, inspect, io, method, session, tools
+from . import check, db, edit, inspect, io, method, serve, session, tools
 
 app = typer.Typer(no_args_is_help=True, add_completion=False,
                   help="Practical Digital Housekeeping. Keep it tidy. Keep it trustworthy.")
@@ -31,6 +31,7 @@ app.add_typer(method.app, name="method")
 app.add_typer(db.app, name="db")
 app.add_typer(io.app, name="io")
 app.command("generate")(tools.generate)
+app.command("serve")(serve.serve)
 
 
 def _version(value: bool) -> None:

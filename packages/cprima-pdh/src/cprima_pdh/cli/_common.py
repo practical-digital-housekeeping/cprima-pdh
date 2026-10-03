@@ -13,6 +13,7 @@ from pydantic import BaseModel
 from .. import backends, profiles, schema, source
 from ..render import Format, get_renderer
 
+NOT_IMPLEMENTED = 3  # exit code of a planned command: the surface exists, the behaviour does not yet
 Fmt = Annotated[Format, typer.Option("--format", "-f", help="Output format.")]
 Apply = Annotated[bool, typer.Option("--apply", help="Write. Without it: dry run.")]
 
