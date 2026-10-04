@@ -1,9 +1,11 @@
 """Vault fixtures: `.kdbx` files with a sidecar `.toml` of the same name.
 
 Sidecar keys: `password` (each fixture has its own), `client` (the program that wrote it), `format` ("KDBX 4.0",
-"KDBX 3.1"), `description`, and optionally `filled_by` (the vault is a genuine client-made template that code then
-filled; such a vault serves unit and integration tests only). A vault without `filled_by` is **genuine**: made by hand
-in a real client, the only kind allowed in end-to-end tests.
+"KDBX 3.1"), `description`, optionally `keyfile` (the key file the vault also needs, a file of the same folder; this key is read by
+the testkit only, pdh itself reads just `password` from a sidecar), optionally `made_with` (how a real client made it when it was
+not by hand in its window), and optionally `filled_by` (the vault is a genuine client-made template that code then filled; such a
+vault serves unit and integration tests only). A vault without `filled_by` is **genuine**: written by a real client, the only
+kind allowed in end-to-end tests.
 """
 from __future__ import annotations
 
@@ -26,6 +28,7 @@ class Vault:
     format: str
     description: str = ""
     filled_by: str = ""
+    keyfile: Path | None = None  # the key file the vault also needs, if any
 
     @property
     def genuine(self) -> bool:
@@ -50,8 +53,11 @@ def load(name: str) -> Vault:
     if not sidecar.is_file():
         raise FileNotFoundError(f"{path.name} has no sidecar {sidecar.name}")
     meta = tomllib.loads(sidecar.read_text(encoding="utf-8"))
+    keyfile = VAULT_DIR / meta["keyfile"] if meta.get("keyfile") else None
+    if keyfile is not None and not keyfile.is_file():
+        raise FileNotFoundError(f"{path.name} names the key file {keyfile.name}, which is missing")
     return Vault(name=name, path=path, password=meta["password"], client=meta["client"], format=meta["format"],
-                 description=meta.get("description", ""), filled_by=meta.get("filled_by", ""))
+                 description=meta.get("description", ""), filled_by=meta.get("filled_by", ""), keyfile=keyfile)
 
 
 def all_vaults() -> list[Vault]:

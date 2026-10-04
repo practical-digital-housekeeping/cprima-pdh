@@ -2,9 +2,10 @@
 the other vault of an import. A key file is key material: it is read to open a vault and never written by pdh."""
 import json
 import os
+import shutil
 
 import pytest
-from pdh_testkit import DEFAULT_PASSWORD, Entry, synthetic_vault
+from pdh_testkit import DEFAULT_PASSWORD, Entry, synthetic_vault, vaults
 from typer.testing import CliRunner
 
 from cprima_pdh import session
@@ -163,3 +164,48 @@ def test_the_session_remembers_where_the_key_file_is_not_what_is_in_it(locked, k
     password, keyfile = session.load_session(locked)
     assert password == DEFAULT_PASSWORD and keyfile == str(key.resolve())
     assert KEY_BYTES not in session.SESSION_FILE.read_bytes()
+
+
+# --- the genuine fixture: a KDBX 4.0 vault and its KeePassXC key file, both written by KeePassXC -------------------------------
+
+@pytest.fixture
+def genuine(tmp_path):
+    """Copies of the committed fixture (never the originals) and the environment that opens them."""
+    fixture = vaults.load("keyfile-kdbx4")
+    db, key = tmp_path / "g.kdbx", tmp_path / "g.keyx"
+    shutil.copyfile(fixture.path, db)
+    shutil.copyfile(fixture.keyfile, key)
+    return db, key, {"KDBX_PASSWORD": fixture.password, "KDBX_KEY": str(key)}
+
+
+def test_pdh_opens_the_genuine_vault_with_its_key_file(genuine):
+    db, key, env = genuine
+    assert entries(db, env=env).exit_code == 0
+    assert entries(db, "--key", str(key), env={"KDBX_PASSWORD": env["KDBX_PASSWORD"]}).exit_code == 0
+    assert entries(db, env={"KDBX_PASSWORD": env["KDBX_PASSWORD"]}).exit_code == 1  # without the key file: refused
+
+
+def test_doctor_names_the_genuine_vaults_format(genuine):
+    db, _, env = genuine
+    result = CliRunner().invoke(app, ["--db", str(db), "doctor"], env=env)
+    assert result.exit_code == 0 and "KDBX 4.0" in result.stdout
+
+
+def test_the_library_opens_the_genuine_vault(genuine):
+    db, key, env = genuine
+    with open_vault(db, password=env["KDBX_PASSWORD"], keyfile=key) as v:
+        assert v.accounts() == []
+    with pytest.raises(OpenError):
+        open_vault(db, password=env["KDBX_PASSWORD"])
+
+
+def test_a_write_to_the_genuine_vault_keeps_the_key_file_requirement(genuine):
+    db, key, env = genuine
+    for command in (["edit", "new-group", "/", "Shops"], ["edit", "new-entry", "Shops", "site", "alex"],
+                    ["edit", "fill", "Shops/site", "--generate"]):
+        result = CliRunner().invoke(app, ["--db", str(db), *command, "--apply"], env=env)
+        assert result.exit_code == 0, f"{command}: {result.stderr}"
+    with open_vault(db, password=env["KDBX_PASSWORD"], keyfile=key) as v:
+        assert [a.title for a in v.accounts()] == ["site"] and v.secret("Shops/site").get_secret_value()
+    with pytest.raises(Exception):
+        pykeepass_open(db, env["KDBX_PASSWORD"], None)

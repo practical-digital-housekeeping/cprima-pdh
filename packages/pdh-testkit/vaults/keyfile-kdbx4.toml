@@ -1,0 +1,8 @@
+# Sidecar of keyfile-kdbx4.kdbx: an empty vault that needs a password AND a key file.
+# Throwaway test password and key file; never use them for anything real.
+password = "test123"
+keyfile = "keyfile-kdbx4.keyx"
+client = "KeePassXC"
+format = "KDBX 4.0"
+made_with = "keepassxc-cli 2.7.12 db-edit --set-key-file, on a copy of template-kdbx4.kdbx"
+description = "Empty vault (Root group only) that opens only with its password and its key file (a KeePassXC XML key file, version 2.0). The vault and the key file were both written by KeePassXC's own engine, from the genuine template; nobody scripted it in code. Copy both files, never edit them."

@@ -35,6 +35,15 @@ def test_templates_are_genuine_and_a_filled_vault_says_otherwise():
 
 
 @pytest.mark.parametrize("vault", vaults.all_vaults(), ids=lambda v: v.name)
-def test_it_opens_with_its_own_password(vault):
-    kp = PyKeePass(str(vault.path), password=vault.password)
+def test_it_opens_with_its_own_password_and_key_file_if_it_has_one(vault):
+    kp = PyKeePass(str(vault.path), password=vault.password, keyfile=str(vault.keyfile) if vault.keyfile else None)
     assert kp.kdbx.body.payload.xml.findtext("Meta/Generator") == vault.client
+
+
+def test_a_vault_with_a_key_file_does_not_open_without_it():
+    vault = vaults.load("keyfile-kdbx4")
+    assert vault.keyfile is not None and vault.genuine and vault.format == "KDBX 4.0"
+    with pytest.raises(Exception):
+        PyKeePass(str(vault.path), password=vault.password)
+    with pytest.raises(Exception):
+        PyKeePass(str(vault.path), keyfile=str(vault.keyfile))  # and the key file alone does not open it either
