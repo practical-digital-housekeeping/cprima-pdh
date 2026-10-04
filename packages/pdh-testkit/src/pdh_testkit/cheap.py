@@ -17,7 +17,8 @@ from pathlib import Path
 from . import vaults
 from .vault import _FAST_ARGON2
 
-_FAST_ROUNDS = 1000
+# `PDH_TEST_KDF_ROUNDS=<n>` sets the lowered round count; `0` uses the genuine files unchanged (hours for the AES-KDF template)
+_FAST_ROUNDS = int(os.environ.get("PDH_TEST_KDF_ROUNDS", "1000"))
 _prototypes: dict[str, bytes] = {}
 
 
@@ -50,7 +51,7 @@ def _cached(name: str) -> bytes:
     """The cheap copy from the temporary directory, made first if it is not there or the template changed."""
     source = vaults.load(name).path
     stamp = f"{source.stat().st_size}-{source.stat().st_mtime_ns}"
-    cache = Path(tempfile.gettempdir()) / f"pdh-cheap-{name}-{stamp}.kdbx"
+    cache = Path(tempfile.gettempdir()) / f"pdh-cheap-{name}-{stamp}-r{_FAST_ROUNDS}.kdbx"
     if not cache.exists():
         data = _lowered(name)
         part = cache.with_name(f"{cache.name}.{os.getpid()}.part")  # several test workers may build it at once
@@ -62,7 +63,7 @@ def _cached(name: str) -> bytes:
 def cheap_copy(name: str, path: Path) -> Path:
     """Write a copy of the genuine template `name` to `path`, with the cost of its key derivation lowered."""
     if name not in _prototypes:
-        _prototypes[name] = _cached(name)
+        _prototypes[name] = _cached(name) if _FAST_ROUNDS else vaults.load(name).path.read_bytes()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(_prototypes[name])
     return path
