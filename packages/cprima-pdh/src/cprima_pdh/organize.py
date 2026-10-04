@@ -59,26 +59,28 @@ def new_group(open_db: Callable[[], object], db: Path, parent: str, name: str, a
 
 def new_entry(open_db: Callable[[], object], db: Path, group: str, title: str, username: str, password: str,
               apply: bool, url: str | None = None, notes: str | None = None, tags: list[str] | None = None,
-              expires: str | None = None, fields: dict[str, str] | None = None,
-              secret_fields: dict[str, str] | None = None) -> OrgChange:
-    """Create a complete entry in one call. Passwords and secret field values are written, never shown or returned."""
+              expires: str | None = None, fields: dict[str, str] | None = None, sset=None) -> OrgChange:
+    """Create an entry in one call: structure, and the password it is handed (from a prompt, never from an argument). A custom
+    field that holds a secret is refused (see `boundary`); it is added afterwards with `pdh edit set`. Nothing is shown."""
     from datetime import date, datetime, timezone
 
+    from . import boundary
     from .backends.kdbx import OTP_PREFIXES, STANDARD_ATTR
     from .txn import Plan, execute_vault
 
-    fields, secret_fields, tags = dict(fields or {}), dict(secret_fields or {}), list(tags or [])
+    fields, tags = dict(fields or {}), list(tags or [])
     day = None
     if expires is not None:
         try:
             day = date.fromisoformat(expires)
         except ValueError:
             raise WriteError(f"{expires!r} is not a date (YYYY-MM-DD)") from None
-    for name in [*fields, *secret_fields]:
+    for name in fields:
         if not name or name in STANDARD_ATTR or name.startswith(OTP_PREFIXES):
             raise WriteError(f"{name!r} is a standard or OTP field name; only custom fields can be given with --field")
-    if set(fields) & set(secret_fields):
-        raise WriteError("a field is given both as --field and --secret-field")
+        if boundary.secret_columns([name], sset):
+            raise WriteError(f"--field {name}: a field that holds a secret is never given on the command line; create the "
+                             f"entry, then `pdh edit set PATH {name} -` (hidden prompt)")
     for tag in tags:
         if not tag.strip() or ";" in tag or "," in tag:
             raise WriteError(f"tag {tag!r} must be non-empty and contain no ';' or ','")
@@ -94,7 +96,7 @@ def new_entry(open_db: Callable[[], object], db: Path, group: str, title: str, u
         data = EntryData(
             id="", group_path=g.path, group_id=g.id, title=title, username=username, password=password, url=url or "",
             notes=notes or "", tags=tuple(tags), expires=day is not None, expiry=moment,
-            fields={**{n: Field(v, False) for n, v in fields.items()}, **{n: Field(v, True) for n, v in secret_fields.items()}})
+            fields={n: Field(v, False) for n, v in fields.items()})
 
         def mutate(v: Vault) -> None:
             v.add_entry(g.id, data)
@@ -109,11 +111,11 @@ def new_entry(open_db: Callable[[], object], db: Path, group: str, title: str, u
                 problems.append("the stored standard fields differ")
             if sorted(e.tags) != sorted(tags):
                 problems.append("the stored tags differ")
-            for name, value in {**fields, **secret_fields}.items():
+            for name, value in fields.items():
                 got = e.fields.get(name)
                 if got is None or got.value != value:
                     problems.append("a custom field differs")
-                elif got.protected != (name in secret_fields):
+                elif got.protected:
                     problems.append("a custom field has the wrong protection")
             if (day is not None) != e.expires:
                 problems.append("the expiry differs")

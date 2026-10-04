@@ -1,7 +1,7 @@
 """Exports: the only things pdh writes outside the vault, and only to the file the owner names with --out.
 
 An existing file is never overwritten. Secrets (passwords, one-time-password secrets, protected custom fields) are in
-a CSV export only with `with_secrets`. Reports name the file and count entries; they never contain a value.
+a CSV export never. Reports name the file and count entries; they never contain a value.
 """
 from __future__ import annotations
 
@@ -42,28 +42,40 @@ def _live(source):
     return [e for e in as_vault(source).entries() if not e.in_bin]
 
 
-def export_csv(source, out: Path, with_secrets: bool = False) -> FileWritten:
-    """Write the live entries (not the recycle bin) as CSV; secrets only with `with_secrets`."""
+def export_csv(source, out: Path, sset=None) -> FileWritten:
+    """Write the live entries (not the recycle bin) as CSV, for review in a spreadsheet. A secret has no column at all, not an
+    empty one: a column for a secret is what `import-csv` refuses (see `boundary`), so the export must be something it
+    accepts back. Secret: a field the file protects in any entry, or one `boundary` names (the KDBX ecosystem's, the taxonomy's).
+    Cells a spreadsheet would run as a formula (they start with =, +, - or @) are written as text."""
+    from . import boundary
+
     entries = _live(source)
     custom = sorted({k for e in entries for k in e.fields})
-    head = ["Group", "Title", "UserName", *(["Password", "OTP"] if with_secrets else []), "URL", "Notes", "Tags",
-            "Expires", *custom]
+    secret = set(boundary.secret_columns(custom, sset)) | {k for e in entries for k, f in e.fields.items() if f.protected}
+    custom = [k for k in custom if k not in secret]
+    head = ["Group", "Title", "UserName", "URL", "Notes", "Tags", "Expires", *custom]
     buffer = io.StringIO(newline="")
     writer = csv.writer(buffer, lineterminator="\n")
     writer.writerow(head)
     for e in entries:
-        row = [e.group_path, e.title, e.username]
-        if with_secrets:
-            row += [e.password, e.otp]
-        row += [e.url, e.notes, ";".join(e.tags), e.expiry.date().isoformat() if e.expires and e.expiry else ""]
-        for k in custom:
-            field = e.fields.get(k)
-            row.append("" if field is None or (field.protected and not with_secrets) else field.value)
-        writer.writerow(row)
+        row = [e.group_path, e.title, e.username, e.url, e.notes, ";".join(e.tags),
+               e.expiry.date().isoformat() if e.expires and e.expiry else ""]
+        row += [e.fields[k].value if k in e.fields else "" for k in custom]
+        writer.writerow([_as_text(cell) for cell in row])
     data = buffer.getvalue().encode("utf-8")
     with _create_exclusive(out) as f:
         f.write(data)
     return FileWritten(kind="csv", path=str(out), entries=len(entries), bytes=len(data))
+
+
+_FORMULA_START = ("=", "+", "-", "@", "\t", "\r")
+
+
+def _as_text(cell: str) -> str:
+    """A cell as text: one that starts like a formula gets a leading apostrophe, so a spreadsheet shows it and does not run it
+    (CSV injection). A value that merely starts with a minus sign is rare in these columns, and a visible apostrophe is the
+    safe side."""
+    return "'" + cell if cell.startswith(_FORMULA_START) else cell
 
 
 def export_kdbx(source, out: Path, new_password: str) -> FileWritten:

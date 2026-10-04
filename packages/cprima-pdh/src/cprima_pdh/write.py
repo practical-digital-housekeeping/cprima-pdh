@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Callable
 
 from .backends.kdbx import STANDARD_ATTR, STANDARD_PROTECTED
+from . import boundary
 from .models import Change
 from .schema import make_ref, uuid_key
 from .vault import Vault, as_vault
@@ -51,7 +52,11 @@ def plan_set(
     protect: bool,
     username: str | None = None,
     unprotect: bool = False,
+    literal: bool = False,
+    sset=None,
 ) -> Change:
+    """What setting one field would do. `literal`: the value came from the command line, which is never allowed for a secret
+    (the profile's protected fields, the standard ones, what the file protects, anything with --protect); `-` prompts instead."""
     if protect and unprotect:
         raise WriteError("--protect and --unprotect exclude each other")
     vault = as_vault(source)
@@ -60,6 +65,9 @@ def plan_set(
     e = find_data(vault, path, username)
     old = _value(e, field)
     hide = protection_of(e, field, protect, unprotect)
+    if literal and (hide or protect or boundary.secret_columns([field], sset)):
+        raise WriteError(f"{field} is a secret: pdh never takes a secret on the command line. Give `-` as the value "
+                         f"for a hidden prompt.")
     shown = (lambda v: _HIDDEN if v and hide else v)
     if old == value:
         action = "unchanged"
@@ -89,13 +97,15 @@ def apply_set(
     protect: bool,
     username: str | None = None,
     unprotect: bool = False,
+    literal: bool = False,
+    sset=None,
 ) -> Change:
     """Set one field on one entry: history snapshot, one save, reopened and verified (see `txn.execute_vault`)."""
     from .txn import Plan, execute_vault
 
     def build(vault: Vault) -> Plan:
         wanted = value(vault) if callable(value) else value
-        change = plan_set(vault, path, field, wanted, overwrite, protect, username, unprotect)
+        change = plan_set(vault, path, field, wanted, overwrite, protect, username, unprotect, literal, sset)
         if change.action != "set":
             return Plan(change=change)
         e = find_data(vault, path, username)

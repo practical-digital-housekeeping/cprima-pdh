@@ -15,7 +15,6 @@ from . import _common as c
 
 app = typer.Typer(no_args_is_help=True, help="The database itself: create, key, settings, recycle bin. Dry run unless --apply.")
 
-PasswordEnv = Annotated[str, typer.Option("--password-env", help="Environment variable holding the new master password.")]
 
 
 def _vault(ctx: typer.Context):
@@ -28,13 +27,16 @@ def _refused(exc: Exception) -> None:
     c.fail(f"write refused: {exc}")
 
 
-def _new_password(env_name: str) -> str:
-    """The new master password: the environment variable, else a hidden prompt (twice) on a real console."""
-    value = os.environ.get(env_name, "")
+NEW_PASSWORD = "PDH_NEW_PASSWORD"  # the new master passphrase: one fixed variable, no pointer option
+
+
+def _new_password() -> str:
+    """The new master passphrase: PDH_NEW_PASSWORD, else a hidden prompt (twice) on a real console."""
+    value = os.environ.get(NEW_PASSWORD, "")
     if value:
         return value
     if not c._has_console():
-        c.fail(f"write refused: environment variable {env_name} is empty and there is no terminal to ask on")
+        c.fail(f"write refused: {NEW_PASSWORD} is empty and there is no terminal to ask on")
     first = typer.prompt("New master password", hide_input=True, err=True)
     if first != typer.prompt("Repeat it", hide_input=True, err=True):
         c.fail("write refused: the two passwords differ")
@@ -47,10 +49,10 @@ def create(
     fmt: c.Fmt = Format.text,
     apply: c.Apply = False,
     keyfile: Annotated[Optional[Path], typer.Option("--keyfile", help="Also require this key file.")] = None,
-    password_env: PasswordEnv = "PDH_NEW_PASSWORD",
+
 ) -> None:
-    """Create a new, empty KDBX 4 vault (KeePass' default key derivation)."""
-    password = _new_password(password_env) if apply else "x"  # a dry run needs no password
+    """Create a new, empty KDBX 4 vault (KeePass' default key derivation); its passphrase from PDH_NEW_PASSWORD or a prompt."""
+    password = _new_password() if apply else "x"  # a dry run needs no password
     try:
         change = database_mod.create_vault(file, password, keyfile, apply)
     except write_mod.WriteError as exc:
@@ -59,10 +61,9 @@ def create(
 
 
 @app.command("password")
-def password(ctx: typer.Context, fmt: c.Fmt = Format.text, apply: c.Apply = False,
-             password_env: PasswordEnv = "PDH_NEW_PASSWORD") -> None:
-    """Change the master password; the cached session is discarded."""
-    new = _new_password(password_env) if apply else os.environ.get(password_env, "") or "x"
+def password(ctx: typer.Context, fmt: c.Fmt = Format.text, apply: c.Apply = False) -> None:
+    """Change the master passphrase, from PDH_NEW_PASSWORD or a hidden prompt; the cached session is discarded."""
+    new = _new_password() if apply else os.environ.get(NEW_PASSWORD, "") or "x"
     db, opener = _vault(ctx)
     try:
         change = database_mod.change_password(opener, db, new, apply)

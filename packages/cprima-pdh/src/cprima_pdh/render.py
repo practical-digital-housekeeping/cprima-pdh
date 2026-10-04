@@ -16,6 +16,7 @@ from .models import (
     BackendList,
     DoctorReport,
     EntryList,
+    FillReport,
     GroupNode,
     ProfileList,
     SessionState,
@@ -74,6 +75,15 @@ def _(data: TaxonomyDoc, ascii_only: bool = False) -> str:  # already Markdown, 
 def _(data: EntryList, ascii_only: bool = False) -> str:
     return "".join(
         f"{r.group}/{r.title}  [{r.username}]  {r.url}{'  #' + ','.join(r.tags) if r.tags else ''}\n" for r in data.entries)
+
+
+@to_text.register
+def _(data: FillReport, ascii_only: bool = False) -> str:
+    lines = [f"{i.entry}: {i.field} ({i.how})\n" for i in data.items]
+    lines.append(f"{data.fields} secret field(s) in {data.entries} entr{'y' if data.entries == 1 else 'ies'} under {data.target}: "
+                 f"{data.generated} generated, {data.typed} typed, {data.skipped} skipped"
+                 f"{'' if data.applied or not data.items else ' (a dry run: nothing was asked or written; add --apply)'}\n")
+    return "".join(lines)
 
 
 @to_text.register

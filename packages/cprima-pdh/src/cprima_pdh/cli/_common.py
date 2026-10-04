@@ -1,6 +1,7 @@
 """Shared CLI plumbing: global state, opening the vault, loading the taxonomy, rendering, error mapping."""
 from __future__ import annotations
 
+import os
 import sys
 from dataclasses import dataclass
 from enum import Enum
@@ -65,6 +66,23 @@ def prompt_password() -> str | None:
     return typer.prompt("Master password (empty for none)", hide_input=True, default="", show_default=False, err=True) or None
 
 
+_stdin_password: str | None = None  # set by the --password-stdin option for the duration of one command
+
+
+def set_stdin_password(value: str | None) -> None:
+    global _stdin_password
+    _stdin_password = value
+
+
+def explicit_password() -> tuple[str, str] | None:
+    """The master passphrase given explicitly as (passphrase, channel): `--password-stdin`, else a non-empty KDBX_PASSWORD.
+    None when neither is given (an empty variable counts as not set)."""
+    if _stdin_password is not None:
+        return _stdin_password, "--password-stdin"
+    value = os.environ.get("KDBX_PASSWORD", "")
+    return (value, "KDBX_PASSWORD") if value else None
+
+
 def require_db(st: AppState) -> Path:
     if st.db is None:
         fail("no vault: pass --db or --vault before the command, set KDBX_FILE, or configure one (pdh.toml)")
@@ -91,7 +109,8 @@ def open_db(db: Path, key: Path | None):
     """Open a KDBX vault (session cache first, else prompt). Tests replace this function."""
     require_backend("kdbx")
     try:
-        return source.open_db(db, key, prompt_password)
+        given = explicit_password()
+        return source.open_db(db, key, prompt_password, given[0] if given else None)
     except source.OpenError as exc:
         fail(f"open failed: {exc}", 1)
 

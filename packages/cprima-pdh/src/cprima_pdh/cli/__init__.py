@@ -6,6 +6,7 @@ They also come from the environment: KDBX_FILE, KDBX_KEY, PDH_SCHEMAS.
 """
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from typing import Annotated, Optional
 
@@ -51,6 +52,8 @@ def main(
     profile: Annotated[Optional[str], typer.Option("--profile", envvar="PDH_PROFILE",
                                                    help="The taxonomy profile (env PDH_PROFILE); see "
                                                         "`pdh method profiles`.")] = None,
+    password_stdin: Annotated[bool, typer.Option("--password-stdin", help="Read the vault's master passphrase from standard "
+                                                 "input (one line); the environment variable is KDBX_PASSWORD.")] = False,
     backend: Annotated[Optional[str], typer.Option("--backend", envvar="PDH_BACKEND",
                                                    help="The kind of vault (env PDH_BACKEND), instead of telling it from "
                                                         "the file; see `pdh backends`.")] = None,
@@ -61,7 +64,8 @@ def main(
 ) -> None:
     """Practical Digital Housekeeping: keep your digital life in order, starting with your password database.
 
-    The backend (kdbx, sops, ...): --backend/PDH_BACKEND, else the vault's own `backend` in the config, else the
+    The master passphrase: --password-stdin, else KDBX_PASSWORD, else the vault's sidecar, else the unlocked session,
+    else a hidden prompt. The backend (kdbx, sops, ...): --backend/PDH_BACKEND, else the vault's own `backend` in the config, else the
     config's `backend`, else the file's content; a choice the file contradicts is refused. The vault: --db, else --vault/PDH_VAULT (a name in the config), else KDBX_FILE, else the config's default,
     else the vault of the unlocked session. The profile: --profile/PDH_PROFILE, else the vault's own `profile` in the
     config, else the config's `profile`, else `pdh-default`. Config files: ~/.config/cprima-pdh/config.toml, ./pdh.toml,
@@ -80,6 +84,13 @@ def main(
         chosen, origin = resolved.profile, resolved.profile_source
     else:
         chosen, origin = profiles.DEFAULT, ""
+    if password_stdin:
+        line = sys.stdin.readline().rstrip("\r\n")
+        if not line:
+            c.fail("--password-stdin: no passphrase on standard input")
+        c.set_stdin_password(line)
+    else:
+        c.set_stdin_password(None)
     choices: list[tuple[str, str]] = []
     if backend is not None:
         from_env = getattr(ctx.get_parameter_source("backend"), "name", "") == "ENVIRONMENT"
@@ -107,13 +118,14 @@ def doctor(ctx: typer.Context, fmt: c.Fmt = Format.text) -> None:
 
             return SopsVault.open(db, age.load_identities(st.key) if st.key else default_identities())
         # only with a sidecar password or a session: doctor never prompts
-        if source_mod.sidecar(db) is None and session_mod.load_session(db) is None:
+        if source_mod.sidecar(db) is None and session_mod.load_session(db) is None and c.explicit_password() is None:
             return None
         return c.open_kdbx(st, db)
 
     report = doctor_mod.diagnose(st.db, lambda: c.read_taxonomy(st), c.taxonomy_source(st), open_unlocked,
                                  vault_source=st.vault_source, taxonomy_origin=c.taxonomy_origin(st),
-                                 backend_choices=st.backend_choices)
+                                 backend_choices=st.backend_choices,
+                                 unlock_channel=(c.explicit_password() or ("", ""))[1])
     c.emit(report, fmt)
     if report.failed:
         raise typer.Exit(1)

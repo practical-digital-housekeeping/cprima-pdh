@@ -1,7 +1,6 @@
 """`pdh edit`: changes to the vault. Every command is a dry run unless --apply; backups are the owner's job."""
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import Annotated, Optional
 
@@ -10,12 +9,17 @@ import typer
 from .. import attachments as attachments_mod
 from .. import entries as entries_mod
 from .. import history as history_mod
+from .. import secret_fields as secret_fields_mod
 from .. import fix as fix_mod
 from .. import groups as groups_mod
 from .. import organize as organize_mod
 from .. import write as write_mod
+from ..models import FillItem, FillReport
 from ..render import Format
+from ..vault import as_vault
+from .. import generate as generate_mod
 from . import _common as c
+from . import _generator as g
 
 app = typer.Typer(no_args_is_help=True, help="Change the vault. Dry run unless --apply.")
 
@@ -38,7 +42,7 @@ def set_field(
     ctx: typer.Context,
     path: EntryPath,
     field: Annotated[str, typer.Argument(help="Title, UserName, Password, URL, Notes, otp or a custom field.")],
-    value: Annotated[str, typer.Argument(help="New value; `-` prompts (hidden) instead.")],
+    value: Annotated[str, typer.Argument(help="New value; `-` prompts (hidden) instead, and is the only way to give a secret.")],
     fmt: c.Fmt = Format.text,
     apply: c.Apply = False,
     overwrite: Annotated[bool, typer.Option("--overwrite", help="Replace a non-empty value.")] = False,
@@ -49,14 +53,16 @@ def set_field(
     """Set one field on one entry. An existing protection is kept unless --unprotect; the old state goes to the history."""
     if protect and unprotect:
         c.fail("--protect and --unprotect exclude each other")
-    if value == "-":
+    literal = value != "-"
+    if not literal:
         value = typer.prompt("Value", hide_input=True, err=True)
+    sset = c.load_taxonomy(c.state(ctx))
     db, opener = _vault(ctx)
     try:
         if apply:
-            change = write_mod.apply_set(opener, db, path, field, value, overwrite, protect, username, unprotect)
+            change = write_mod.apply_set(opener, db, path, field, value, overwrite, protect, username, unprotect, literal, sset)
         else:
-            change = write_mod.plan_set(opener(), path, field, value, overwrite, protect, username, unprotect)
+            change = write_mod.plan_set(opener(), path, field, value, overwrite, protect, username, unprotect, literal, sset)
     except write_mod.WriteError as exc:
         _refused(exc)
     c.emit(change, fmt)
@@ -406,20 +412,21 @@ def new_entry(
     title: Annotated[str, typer.Argument(help="Title of the new entry.")],
     username: Annotated[str, typer.Argument(help="UserName.")],
     fmt: c.Fmt = Format.text,
-    password_env: Annotated[str, typer.Option("--password-env", help="Environment variable holding the password.")] = "PDH_NEW_PASSWORD",
     apply: c.Apply = False,
     url: Annotated[Optional[str], typer.Option("--url", help="The entry's URL.")] = None,
     notes: Annotated[Optional[str], typer.Option("--notes", help="The entry's notes.")] = None,
     tag: Annotated[Optional[list[str]], typer.Option("--tag", help="A tag (repeat for several).")] = None,
     expires: Annotated[Optional[str], typer.Option("--expires", help="Expiry date, YYYY-MM-DD.")] = None,
-    field: Annotated[Optional[list[str]], typer.Option("--field", help="A custom field NAME=VALUE (repeat).")] = None,
-    secret_field: Annotated[Optional[list[str]], typer.Option(
-        "--secret-field", help="A protected custom field NAME=ENVVAR; the value is read from that environment variable.")] = None,
+    field: Annotated[Optional[list[str]], typer.Option("--field", help="A custom field NAME=VALUE (repeat); a field that "
+                                                       "holds a secret is refused: add it with `pdh edit set PATH FIELD -`.")] = None,
 ) -> None:
-    """Create an entry in one call. Passwords and secret values come from environment variables, never from argv."""
-    password = os.environ.get(password_env, "")
-    if not password:
-        c.fail(f"write refused: environment variable {password_env} is empty")
+    """Create an entry in one call: structure only. Its password is asked for with a hidden prompt when there is a terminal
+    (Enter leaves it empty); without a terminal the entry is created without one. A secret is never an argument: add it with
+    `pdh edit set PATH FIELD -`."""
+    password = ""
+    if apply and c._has_console():
+        password = typer.prompt("Password (empty for none)", hide_input=True, default="", show_default=False,
+                                confirmation_prompt=True, err=True)
 
     def pairs(items: list[str] | None, what: str) -> dict[str, str]:
         out: dict[str, str] = {}
@@ -431,18 +438,95 @@ def new_entry(
         return out
 
     fields = pairs(field, "--field")
-    secrets: dict[str, str] = {}
-    for name, var in pairs(secret_field, "--secret-field").items():
-        if var not in os.environ or not os.environ[var]:
-            c.fail(f"write refused: environment variable {var} (for --secret-field {name}) is empty")
-        secrets[name] = os.environ[var]
     db, opener = _vault(ctx)
     try:
         change = organize_mod.new_entry(opener, db, group, title, username, password, apply, url, notes, tag, expires,
-                                        fields, secrets)
+                                        fields, c.load_taxonomy(c.state(ctx)))
     except write_mod.WriteError as exc:
         _refused(exc)
     c.emit(change, fmt)
+
+
+@app.command("fill")
+def fill(
+    ctx: typer.Context,
+    path: Annotated[str, typer.Argument(help="An entry (`group/title`) or a group: every entry below it is filled.")],
+    fmt: c.Fmt = Format.text,
+    apply: c.Apply = False,
+    generate: Annotated[bool, typer.Option("--generate", help="Generate the fields the taxonomy allows to be generated "
+                                           "(passwords, made-up keys) and store them without showing them; ask for the "
+                                           "rest.")] = False,
+    length: g.Length = g.DEFAULTS.length,
+    lower: g.Lower = True,
+    upper: g.Upper = True,
+    numeric: g.Numeric = True,
+    special: g.Special = False,
+    extended: g.Extended = False,
+    space: g.Space = False,
+    include: g.Include = "",
+    exclude: g.Exclude = "",
+    exclude_similar: g.ExcludeSimilar = g.DEFAULTS.exclude_similar,
+    every_group: g.EveryGroup = g.DEFAULTS.every_group,
+    username: Username = None,
+) -> None:
+    """Fill the secret fields that an entry (or every entry below a group) still lacks. The taxonomy decides which fields
+    are secret and in what order they come. Without --apply it only lists what is missing and asks nothing. With --apply each
+    field is asked for with a hidden prompt (Enter skips it); with --generate the ones that may be generated are generated
+    and stored without being shown, so you read them in your KeePass client, for example to paste into a registration form.
+    A secret is never an argument, and everything is written in one go, one history snapshot per entry. The options that
+    shape a generated password are those of `pdh generate`."""
+    try:
+        settings = g.password_settings(length, lower, upper, numeric, special, extended, space, include, exclude,
+                                       exclude_similar, every_group)
+        generate_mod.check(settings)  # a setting that cannot make a password is refused before anything is opened or asked
+    except ValueError as exc:
+        c.fail(f"write refused: {exc}", 2)
+    st = c.state(ctx)
+    db = c.require_db(st)
+    sset = c.load_taxonomy(st)
+    kp = c.open_kdbx(st, db)
+    try:
+        targets = secret_fields_mod.fill_targets(as_vault(kp), path, sset, username)
+    except write_mod.WriteError as exc:
+        _refused(exc)
+    pairs = [(t, f) for t in targets for f in t.fields]
+
+    def report(items: list[FillItem], applied: bool) -> FillReport:
+        count = lambda how: sum(1 for i in items if i.how == how)  # noqa: E731
+        return FillReport(target=path, entries=len(targets), fields=len(pairs), generated=count("generated"),
+                          typed=count("typed"), skipped=count("skipped"), items=items, applied=applied)
+
+    if not apply:
+        c.emit(report([FillItem(entry=t.entry.path, field=f.name,
+                                how="to generate" if generate and f.generatable else "to type") for t, f in pairs], False), fmt)
+        return
+    if not pairs:
+        c.emit(report([], False), fmt)
+        return
+    console = c._has_console()
+    if not console and not (generate and any(f.generatable for _, f in pairs)):
+        c.fail("write refused: there is no terminal to ask on; --generate fills the fields that may be generated", 2)
+    values: dict[str, dict[str, str]] = {}
+    items: list[FillItem] = []
+    for t, f in pairs:
+        if generate and f.generatable:
+            value, how = secret_fields_mod.generated(settings), "generated"
+        elif console:
+            value = typer.prompt(f"{t.entry.path}: {f.name} (Enter to skip)", hide_input=True, default="", show_default=False,
+                                 err=True)
+            how = "typed" if value else "skipped"
+        else:
+            value, how = "", "skipped"
+        if value:
+            values.setdefault(t.entry.id, {})[f.name] = value
+        items.append(FillItem(entry=t.entry.path, field=f.name, how=how))
+    applied = False
+    if values:
+        try:
+            applied = secret_fields_mod.fill_entries(lambda: kp, db, values, True, sset).applied
+        except write_mod.WriteError as exc:
+            _refused(exc)
+    c.emit(report(items, applied), fmt)
 
 
 @app.command("new-group")

@@ -1,6 +1,5 @@
 """`pdh generate` (password or passphrase, printed, never stored) and `pdh inspect otp` (the current code, never the secret)."""
 import json
-import string
 
 import pytest
 from pdh_testkit import DEFAULT_PASSWORD, Entry, synthetic_vault
@@ -8,46 +7,11 @@ from typer.testing import CliRunner
 
 from cprima_pdh import otp
 from cprima_pdh.cli import app
-from cprima_pdh.generate import passphrase, password
 
 pytestmark = pytest.mark.usefixtures("opens_with_the_test_password")
 
 
-# --- generate -----------------------------------------------------------------------------------------------------
-
-def test_a_password_has_the_length_and_every_character_class():
-    for _ in range(50):
-        p = password(20, symbols=True)
-        assert len(p) == 20
-        assert any(c in string.ascii_lowercase for c in p) and any(c in string.ascii_uppercase for c in p)
-        assert any(c in string.digits for c in p) and any(not c.isalnum() for c in p)
-
-
-def test_without_symbols_a_password_is_alphanumeric():
-    assert all(password(30, symbols=False).isalnum() for _ in range(50))
-
-
-def test_two_passwords_differ():
-    assert len({password(24, symbols=True) for _ in range(20)}) == 20
-
-
-def test_a_password_below_eight_characters_is_refused():
-    with pytest.raises(ValueError):
-        password(7, symbols=True)
-
-
-def test_a_passphrase_takes_words_from_the_list_only():
-    words = [f"word{i}" for i in range(2000)]
-    phrase = passphrase(words, 6, "-")
-    assert len(phrase.split("-")) == 6 and all(w in words for w in phrase.split("-"))
-
-
-def test_a_passphrase_needs_a_long_enough_list_and_at_least_four_words():
-    with pytest.raises(ValueError):
-        passphrase(["a", "b", "c"], 6, "-")
-    with pytest.raises(ValueError):
-        passphrase([f"w{i}" for i in range(2000)], 3, "-")
-
+# --- generate: the CLI (the generator itself is tested in tests/unit/test_generator.py) -----------------------------------
 
 def test_the_generate_command_prints_through_the_renderer():
     result = CliRunner().invoke(app, ["generate", "--length", "24", "-f", "json"])

@@ -50,11 +50,14 @@ def sidecar_password(path: Path) -> str | None:
     return tomllib.loads(side.read_text(encoding="utf-8"))["password"] if side else None
 
 
-def open_db(path: Path, key: Path | None, prompt: Callable[[], str | None]):
-    """Open db with, in this order: the password in its sidecar file, the session cache, or prompt()."""
+def open_db(path: Path, key: Path | None, prompt: Callable[[], str | None], explicit: str | None = None):
+    """Open db with, in this order: a passphrase given explicitly (`--password-stdin`, KDBX_PASSWORD), the password in its
+    sidecar file, the session cache, or prompt(). A wrong explicit passphrase is an error, never a fall-back."""
     side_pw = sidecar_password(path)
-    sess = None if side_pw is not None else load_session(path)
-    if side_pw is not None:
+    sess = None if (explicit is not None or side_pw is not None) else load_session(path)
+    if explicit is not None:
+        password, keyfile = explicit, (str(key) if key else None)
+    elif side_pw is not None:
         password, keyfile = side_pw, (str(key) if key else None)
     elif sess:
         password, sess_key = sess

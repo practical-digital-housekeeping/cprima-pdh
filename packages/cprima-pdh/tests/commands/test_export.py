@@ -51,14 +51,24 @@ def test_csv_has_no_secrets_by_default(vault, tmp_path):
     by = {r["Title"]: r for r in rows(out)}
     assert by["Tagged"]["Group"] == "Money" and by["Tagged"]["Tags"] == "one;two;three"
     assert "In the bin" not in by  # the recycle bin is not exported
-    assert by["Flags"]["plain_k"] == "p" and by["Flags"]["secret_k"] == ""  # a protected custom value is left out
+    assert by["Flags"]["plain_k"] == "p"
+    assert "secret_k" not in rows(out)[0]  # a protected field has no column at all: import-csv would refuse an empty one too
 
 
-def test_csv_with_secrets_includes_passwords_and_protected_fields(vault, tmp_path):
+def test_there_is_no_way_to_export_secrets(vault, tmp_path):
     out = tmp_path / "e.csv"
-    assert invoke(vault, "io", "export-csv", "--out", str(out), "--with-secrets").exit_code == 0
-    by = {r["Title"]: r for r in rows(out)}
-    assert by["With history"]["Password"] == "pw-3" and by["Flags"]["secret_k"] == "s"
+    result = invoke(vault, "io", "export-csv", "--out", str(out), "--with-secrets")
+    assert result.exit_code == 2 and "No such option" in (result.stderr or result.output) and not out.exists()
+
+
+def test_a_cell_a_spreadsheet_would_run_as_a_formula_is_written_as_text(tmp_path):
+    from pdh_testkit import Entry, synthetic_vault
+
+    db = synthetic_vault(tmp_path / "f.kdbx", [Entry("=1+1", group="G", username="@cmd", notes="-2+3", url="https://ok.example.org")])
+    out = tmp_path / "f.csv"
+    assert invoke(db, "io", "export-csv", "--out", str(out)).exit_code == 0
+    row = rows(out)[0]
+    assert (row["Title"], row["UserName"], row["Notes"], row["URL"]) == ("'=1+1", "'@cmd", "'-2+3", "https://ok.example.org")
 
 
 def test_csv_refuses_an_existing_file_and_writes_nothing_without_out(vault, tmp_path):
@@ -70,7 +80,7 @@ def test_csv_refuses_an_existing_file_and_writes_nothing_without_out(vault, tmp_
 
 def test_the_report_names_the_file_and_counts_never_a_value(vault, tmp_path):
     out = tmp_path / "e.csv"
-    result = invoke(vault, "io", "export-csv", "--out", str(out), "--with-secrets", "-f", "json")
+    result = invoke(vault, "io", "export-csv", "--out", str(out), "-f", "json")
     report = json.loads(result.stdout)
     assert report["entries"] > 0 and "pw-" not in result.stdout
 

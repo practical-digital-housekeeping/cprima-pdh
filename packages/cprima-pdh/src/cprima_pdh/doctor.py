@@ -114,7 +114,7 @@ class _Report:
 
 def diagnose(db: Path | None, taxonomy: Callable[[], object], taxonomy_source: str,
              open_unlocked: Callable[[Path], object | None], vault_source: str = "--db",
-             taxonomy_origin: str = "", backend_choices: tuple = ()) -> DoctorReport:
+             taxonomy_origin: str = "", backend_choices: tuple = (), unlock_channel: str = "") -> DoctorReport:
     """`taxonomy()` loads the taxonomy (raises on error); `open_unlocked(db)` returns the opened vault only when a
     session is unlocked for it, else None. It must never prompt."""
     r = _Report()
@@ -155,10 +155,12 @@ def diagnose(db: Path | None, taxonomy: Callable[[], object], taxonomy_source: s
 
     side = sidecar(db)
     left = session.seconds_left()
-    unlocked_here = side is not None or (left > 0 and session.load_session(db) is not None)
+    unlocked_here = bool(unlock_channel) or side is not None or (left > 0 and session.load_session(db) is not None)
     if kind == "sops":
         unlocked_here = True  # no password and no session: an age identity opens it, or nothing does
         r.add("setup", "session", "ok", "not needed: an age identity opens it (--key, SOPS_AGE_KEY_FILE or the default key file)")
+    elif unlock_channel:
+        r.add("setup", "session", "ok", f"not needed: the passphrase comes from {unlock_channel}")
     elif side is not None:
         r.add("setup", "session", "ok", f"not needed: password from sidecar {side.name} (test fixture)")
     elif not left:

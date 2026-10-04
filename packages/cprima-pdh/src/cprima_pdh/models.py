@@ -154,6 +154,23 @@ class HistoryReport(Frozen):
     snapshots: list[HistorySnapshot]
 
 
+class FillItem(Frozen):
+    entry: str  # group/title
+    field: str  # the secret field's name, never a value
+    how: str  # to type | to generate (dry run); typed | generated | skipped (applied)
+
+
+class FillReport(Frozen):
+    target: str  # the entry or group asked for
+    entries: int  # entries that lack a secret field
+    fields: int  # secret fields still empty
+    generated: int = 0
+    typed: int = 0
+    skipped: int = 0
+    items: list[FillItem] = Field(default_factory=list)
+    applied: bool = False
+
+
 class HistoryPrune(Frozen):
     keep: int
     entries: int  # entries that lose snapshots
@@ -204,11 +221,12 @@ class FileWritten(Frozen):
 
 
 class ImportReport(Frozen):
-    kind: str  # csv | vault
+    kind: str  # csv | xlsx | vault
     source: str
     entries: int
     groups: int  # groups that would be (or were) created
-    columns: list[str] = Field(default_factory=list)  # CSV columns that become custom fields
+    columns: list[str] = Field(default_factory=list)  # spreadsheet columns that become custom fields
+    secrets_to_fill: int = 0  # secret fields (by the taxonomy) of the imported entries that are still empty: none came with the file
     applied: bool = False
 
 

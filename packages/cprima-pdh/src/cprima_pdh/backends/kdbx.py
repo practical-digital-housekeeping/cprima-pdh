@@ -21,6 +21,17 @@ OTP_PREFIXES = ("TimeOtp-", "HmacOtp-")
 OTP_STYLES = {"TimeOtp-": "TimeOtp", "HmacOtp-": "HmacOtp"}  # prefix -> the style reported for an entry
 
 
+# Attributes of the KDBX ecosystem that hold a secret whatever a file's own flags say: the one-time-password secrets (KeePassXC's
+# `otp`, its legacy `TOTP Seed` and `TOTP Settings`, the KeePass 2 plugin's `TimeOtp-*` and `HmacOtp-*`) and a passkey's private key.
+SECRET_ATTRIBUTES = frozenset(name.lower() for name in ("otp", "TOTP Seed", "TOTP Settings", "KPEX_PASSKEY_PRIVATE_KEY_PEM"))
+
+
+def is_secret_attribute(name: str) -> bool:
+    """Whether the KDBX ecosystem treats the attribute `name` as a secret (case does not matter)."""
+    lowered = name.strip().lower()
+    return lowered in SECRET_ATTRIBUTES or lowered.startswith(tuple(p.lower() for p in OTP_PREFIXES))
+
+
 def plugin_otp(custom: dict[str, str]) -> dict | None:
     """The settings of a KeePass 2 OTP plugin entry (from its custom fields), normalised; None if it has none."""
     secret = custom.get("TimeOtp-Secret-Base32")

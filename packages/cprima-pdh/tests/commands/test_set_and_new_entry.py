@@ -34,15 +34,15 @@ def prot(e, key):
 # --- set: protection is kept unless asked otherwise ---------------------------------------------------------------
 
 def test_setting_a_protected_custom_field_keeps_it_protected(vault):
-    assert invoke(vault, "edit", "set", "G/a", "secret_k", "new", "--overwrite", "--apply").exit_code == 0
+    assert invoke(vault, "edit", "set", "G/a", "secret_k", "-", "--overwrite", "--apply", input="new\n").exit_code == 0
     a = entry(vault)
     assert a.get_custom_property("secret_k") == "new" and prot(a, "secret_k")  # not silently unprotected
 
 
 def test_unprotect_removes_the_protection_and_protect_adds_it(vault):
-    invoke(vault, "edit", "set", "G/a", "secret_k", "new", "--overwrite", "--unprotect", "--apply")
+    invoke(vault, "edit", "set", "G/a", "secret_k", "-", "--overwrite", "--unprotect", "--apply", input="new\n")
     assert not prot(entry(vault), "secret_k")
-    invoke(vault, "edit", "set", "G/a", "plain_k", "new", "--overwrite", "--protect", "--apply")
+    invoke(vault, "edit", "set", "G/a", "plain_k", "-", "--overwrite", "--protect", "--apply", input="new\n")
     assert prot(entry(vault), "plain_k")
 
 
@@ -52,7 +52,7 @@ def test_protect_and_unprotect_together_are_refused(vault):
 
 def test_a_dry_run_shows_the_change_without_values_of_protected_fields(vault):
     before = vault.read_bytes()
-    result = invoke(vault, "edit", "set", "G/a", "secret_k", "brand-new", "--overwrite", "-f", "json")
+    result = invoke(vault, "edit", "set", "G/a", "secret_k", "-", "--overwrite", "-f", "json", input="brand-new\n")
     data = json.loads(result.stdout)
     assert vault.read_bytes() == before and data["applied"] is False
     assert "brand-new" not in result.stdout and "s1" not in result.stdout  # hidden, old and new
@@ -77,40 +77,93 @@ def test_title_and_notes_can_be_set_and_nothing_else_changes(vault):
     assert entry(vault, "b").title == "b"
 
 
+# --- set: a secret is never an argument -----------------------------------------------------------------------
+
+SECRETS_BY_RULE = [
+    ("Password", []),                 # a standard secret
+    ("otp", []),                      # a standard secret
+    ("secret_k", []),                 # protected in the file (and by name in the profile)
+    ("api_token", []),                # protected by the profile, by name
+    ("TOTP Seed", []),                # the KDBX ecosystem's
+    ("plain_k", ["--protect"]),       # asked to be protected
+]
+
+
+@pytest.mark.parametrize("field,flags", SECRETS_BY_RULE, ids=[f for f, _ in SECRETS_BY_RULE])
+@pytest.mark.parametrize("apply", [[], ["--apply"]], ids=["dry-run", "applied"])
+def test_a_secret_on_the_command_line_is_refused_and_never_echoed(vault, field, flags, apply):
+    before = vault.read_bytes()
+    result = invoke(vault, "edit", "set", "G/a", field, "literal-secret-value", "--overwrite", *flags, *apply)
+    shown = (result.stdout or "") + (result.stderr or "")
+    assert result.exit_code == 2 and "pdh never takes a secret on the command line" in shown and "`-`" in shown
+    assert "literal-secret-value" not in shown and vault.read_bytes() == before
+
+
+def test_a_secret_is_given_by_the_hidden_prompt(vault):
+    result = invoke(vault, "edit", "set", "G/a", "Password", "-", "--overwrite", "--apply", input="from-the-prompt\n")
+    assert result.exit_code == 0 and entry(vault).password == "from-the-prompt"
+    assert "from-the-prompt" not in result.stdout
+
+
+def test_a_value_that_is_not_a_secret_may_still_be_an_argument(vault):
+    assert invoke(vault, "edit", "set", "G/a", "plain_k", "visible", "--overwrite", "--apply").exit_code == 0
+    assert entry(vault).get_custom_property("plain_k") == "visible"
+
+
 # --- new-entry ----------------------------------------------------------------------------------------------
 
-def test_new_entry_with_the_standard_fields_only(vault):
-    result = invoke(vault, "edit", "new-entry", "G", "c", "cu", "--apply", env={"PDH_NEW_PASSWORD": "pw-c"})
+def test_new_entry_without_a_terminal_has_no_password(vault):
+    result = invoke(vault, "edit", "new-entry", "G", "c", "cu", "--apply")
     assert result.exit_code == 0
     c = entry(vault, "c")
-    assert (c.username, c.password) == ("cu", "pw-c")
+    assert c.username == "cu" and not c.password
 
 
-def test_new_entry_takes_everything_in_one_call(vault):
+def test_the_environment_is_not_a_channel_for_an_entrys_password(vault):
+    result = invoke(vault, "edit", "new-entry", "G", "c", "cu", "--apply", env={"PDH_NEW_PASSWORD": "must-be-ignored"})
+    assert result.exit_code == 0 and not entry(vault, "c").password
+
+
+def test_new_entry_asks_for_its_password_with_a_hidden_prompt_on_a_terminal(vault, monkeypatch):
+    from cprima_pdh.cli import _common
+
+    monkeypatch.setattr(_common, "_has_console", lambda: True)
+    result = invoke(vault, "edit", "new-entry", "G", "c", "cu", "--apply", input="pw-c\npw-c\n")
+    assert result.exit_code == 0 and entry(vault, "c").password == "pw-c" and "pw-c" not in result.stdout
+
+
+def test_new_entry_takes_structure_in_one_call(vault):
     result = invoke(vault, "edit", "new-entry", "G", "d", "du", "--url", "https://d.example.org", "--notes", "n",
-                    "--tag", "t1", "--tag", "t2", "--expires", "2032-05-06", "--field", "plain=visible",
-                    "--secret-field", "token=MY_TOKEN", "--apply",
-                    env={"PDH_NEW_PASSWORD": "pw-d", "MY_TOKEN": "tok-123"})
+                    "--tag", "t1", "--tag", "t2", "--expires", "2032-05-06", "--field", "plain=visible", "--apply")
     assert result.exit_code == 0, result.output
     d = entry(vault, "d")
     assert (d.url, d.notes, sorted(d.tags)) == ("https://d.example.org", "n", ["t1", "t2"])
     assert d.expires and d.expiry_time.date().isoformat() == "2032-05-06"
     assert d.get_custom_property("plain") == "visible" and not prot(d, "plain")
-    assert d.get_custom_property("token") == "tok-123" and prot(d, "token")
-    assert "tok-123" not in result.stdout and "pw-d" not in result.stdout
+
+
+@pytest.mark.parametrize("option", ["--secret-field", "--password-env"])
+def test_the_options_that_took_secrets_from_the_environment_are_gone(vault, option):
+    result = invoke(vault, "edit", "new-entry", "G", "e", "u", option, "X=Y")
+    assert result.exit_code == 2 and "No such option" in (result.stderr or result.output)
+
+
+@pytest.mark.parametrize("name", ["Password", "api_token", "TimeOtp-Secret-Base32", "secret_k"])
+def test_a_field_that_holds_a_secret_is_refused_on_new_entry(vault, name):
+    result = invoke(vault, "edit", "new-entry", "G", "e", "u", "--field", f"{name}=literal-secret-value", "--apply")
+    shown = (result.stdout or "") + (result.stderr or "")
+    assert result.exit_code == 2 and "literal-secret-value" not in shown
+    assert not any(e.title == "e" for e in load(vault).entries)
 
 
 def test_new_entry_refuses_bad_input(vault):
-    env = {"PDH_NEW_PASSWORD": "x"}
-    assert invoke(vault, "edit", "new-entry", "G", "a", "u", "--apply", env=env).exit_code == 2  # title exists
-    assert invoke(vault, "edit", "new-entry", "G", "e", "u", "--expires", "nope", env=env).exit_code == 2
-    assert invoke(vault, "edit", "new-entry", "G", "e", "u", "--field", "no-equals", env=env).exit_code == 2
-    assert invoke(vault, "edit", "new-entry", "G", "e", "u", "--field", "Title=x", env=env).exit_code == 2  # standard
-    assert invoke(vault, "edit", "new-entry", "G", "e", "u", "--secret-field", "t=UNSET_VAR", env=env).exit_code == 2
-    assert invoke(vault, "edit", "new-entry", "G", "e", "u", env={}).exit_code == 2  # no password variable
+    assert invoke(vault, "edit", "new-entry", "G", "a", "u", "--apply").exit_code == 2  # title exists
+    assert invoke(vault, "edit", "new-entry", "G", "e", "u", "--expires", "nope").exit_code == 2
+    assert invoke(vault, "edit", "new-entry", "G", "e", "u", "--field", "no-equals").exit_code == 2
+    assert invoke(vault, "edit", "new-entry", "G", "e", "u", "--field", "Title=x").exit_code == 2  # standard
 
 
 def test_new_entry_dry_run_writes_nothing(vault):
     before = vault.read_bytes()
-    assert invoke(vault, "edit", "new-entry", "G", "z", "u", env={"PDH_NEW_PASSWORD": "x"}).exit_code == 0
+    assert invoke(vault, "edit", "new-entry", "G", "z", "u").exit_code == 0
     assert vault.read_bytes() == before

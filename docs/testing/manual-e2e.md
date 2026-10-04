@@ -15,19 +15,23 @@ Set up once:
 ```
 copy packages\pdh-testkit\vaults\template-kdbx4.kdbx work.kdbx
 set KDBX_FILE=work.kdbx
-set PDH_NEW_PASSWORD=pw-example
+set KDBX_PASSWORD=<the template's password from its sidecar>
 pdh edit new-group / Money --apply
 pdh edit new-entry Money "Example login" alex --url https://example.org --tag one --tag two --expires 2031-02-03 ^
     --field account_no=4711 --apply
 ```
 
+`new-entry` asks for the entry's password with a hidden prompt (Enter leaves it empty). A secret is never an argument or an
+environment variable: `edit set PATH FIELD -` asks for it the same way. `KDBX_PASSWORD` is the vault's own passphrase.
+
 Then, per group of commands: run it, open the file in the client, look for the result in the right-hand column.
 
 | Command (all with `--apply`) | In KeePassXC / KeePassDX you should see |
 |---|---|
+| `edit fill Money --generate --apply` | the entry has a generated password you can reveal and copy; nothing was printed |
 | `new-entry` as above | the entry in `Money`, tags `one` and `two`, the expiry date, a custom attribute `account_no` |
 | `edit set Money/"Example login" Notes hello --overwrite` | the notes; the entry's *History* tab lists the previous state |
-| `edit set ... token abc --protect` (custom field) | the attribute is hidden until you reveal it |
+| `edit set ... token - --protect` (custom field; type a value at the prompt) | the attribute is hidden until you reveal it |
 | `edit tags`, `expiry`, `icon 12`, `color --fg #112233 --bg #AABBCC`, `autotype --disabled` | tags changed, the entry shows the icon and colours, auto-type is off for it |
 | `edit clone` | a second entry with the same content and a different title |
 | `edit attach`, then `detach` | the attachment appears with its name and size, opens and has the right content; after `detach` it is gone |
@@ -37,7 +41,7 @@ Then, per group of commands: run it, open the file in the client, look for the r
 | `db settings --name "Example" --history-max-items 5` | the database name in the title bar; the history limit in the database settings |
 | `db password` | the vault opens with the new password only |
 | `db kdf --iterations 3 --memory 8192` | still opens (slightly faster); the database security settings show the new values |
-| `io export-csv --out e.csv` | opens in a spreadsheet; no password column unless `--with-secrets` |
+| `io export-csv --out e.csv` | opens in a spreadsheet; no password, otp or protected-field column at all |
 | `io export-kdbx --out copy.kdbx` | opens with its own password and has the same entries |
 | `io import-kdbx other.kdbx --group Imported` | the other vault's entries below `Imported`, with attachments and protected fields |
 | `io merge copy.kdbx` after editing the same entry in both | the newer state wins; the replaced one is in the History |

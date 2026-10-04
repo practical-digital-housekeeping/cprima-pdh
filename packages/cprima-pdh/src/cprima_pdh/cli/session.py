@@ -21,6 +21,9 @@ def unlock(
     minutes: Annotated[int, typer.Option(help="Session lifetime.")] = 30,
 ) -> None:
     """Prompt once and cache the credentials so later commands don't ask."""
+    if not session_mod.supported():
+        c.fail("session unlock needs Windows (the cache is encrypted with DPAPI); elsewhere give the passphrase with "
+               "KDBX_PASSWORD or --password-stdin", 2)
     st = c.state(ctx)
     db = c.require_db(st)
     c.require_backend("kdbx")

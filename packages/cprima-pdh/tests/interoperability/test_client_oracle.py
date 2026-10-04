@@ -51,8 +51,8 @@ def vault(tmp_path, monkeypatch):
         def set_password(self, value):
             state["password"] = value
 
-        def pdh(self, *args, env=None):
-            result = CliRunner().invoke(app, ["--db", str(path), *args], env=env)
+        def pdh(self, *args, env=None, input=None):
+            result = CliRunner().invoke(app, ["--db", str(path), *args], env=env, input=input)
             assert result.exit_code == 0, f"pdh {' '.join(args)}: {result.output}{result.stderr or ''}"
 
         def show(self, entry, *options):
@@ -69,7 +69,7 @@ def test_the_client_reads_the_messy_vault_pdh_style_tests_build(vault):
 
 def test_fields_tags_and_protection_written_by_pdh_are_read_back(vault):
     vault.pdh("edit", "set", "Money/Tagged", "Notes", "hello from pdh", "--apply")
-    vault.pdh("edit", "set", "Money/Tagged", "token", "abc", "--protect", "--apply")
+    vault.pdh("edit", "set", "Money/Tagged", "token", "-", "--protect", "--apply", input="abc\n")
     vault.pdh("edit", "tags", "Money/Tagged", "--add", "four", "--remove", "one", "--apply")
     shown = vault.show("Money/Tagged")
     assert "Notes: hello from pdh" in shown and "Password: PROTECTED" in shown
@@ -79,7 +79,7 @@ def test_fields_tags_and_protection_written_by_pdh_are_read_back(vault):
 
 
 def test_a_one_time_password_gives_the_same_code_in_the_client(vault):
-    vault.pdh("edit", "set", "Money/Tagged", "otp", f"otpauth://totp/x?secret={SECRET}&digits=6", "--apply")
+    vault.pdh("edit", "set", "Money/Tagged", "otp", "-", "--apply", input=f"otpauth://totp/x?secret={SECRET}&digits=6\n")  # a secret: prompt, not argv
     params = otp.parse(f"otpauth://totp/x?secret={SECRET}&digits=6")
     for _ in range(3):  # a retry if the 30-second window changes between the two readings
         before = otp.code(params).code
@@ -119,8 +119,9 @@ def test_the_recycle_bin_groups_and_moves_are_understood(vault):
 
 def test_a_new_entry_with_everything_in_one_call_is_read_back(vault):
     vault.pdh("edit", "new-entry", "Other", "Created", "carol", "--url", "https://c.example.org", "--notes", "n",
-              "--tag", "t1", "--field", "account_no=4711", "--secret-field", "tok=TOK", "--apply",
-              env={"PDH_NEW_PASSWORD": "pw-created", "TOK": "secret-tok"})
+              "--tag", "t1", "--field", "account_no=4711", "--apply")
+    vault.pdh("edit", "set", "Other/Created", "Password", "-", "--apply", input="pw-created\n")
+    vault.pdh("edit", "set", "Other/Created", "tok", "-", "--protect", "--apply", input="secret-tok\n")
     shown = vault.show("Other/Created", "-s")
     assert "UserName: carol" in shown and "Password: pw-created" in shown and "URL: https://c.example.org" in shown
     assert vault.show("Other/Created", "-a", "account_no").strip() == "4711"
@@ -166,7 +167,7 @@ def test_the_genuine_templates_edited_by_pdh_still_open_in_the_client(template, 
         assert result.exit_code == 0, f"pdh {' '.join(args)}: {result.output}{result.stderr or ''}"
 
     pdh("edit", "new-group", "/", "Money", "--apply")
-    pdh("edit", "new-entry", "Money", "a", "alex", "--tag", "x", "--field", "k=v", "--apply", env={"PDH_NEW_PASSWORD": "pw"})
+    pdh("edit", "new-entry", "Money", "a", "alex", "--tag", "x", "--field", "k=v", "--apply")
     pdh("edit", "tags", "Money/a", "--add", "y", "--apply")
     pdh("edit", "set", "Money/a", "Notes", "hi", "--apply")
     pdh("edit", "delete", "Money/a", "--apply")

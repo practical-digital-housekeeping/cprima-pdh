@@ -36,8 +36,8 @@ def ctx(request, tmp_path, monkeypatch):
         def set_password(self, value):
             state["password"] = value
 
-        def run(self, *args, env=None, expect=0):
-            result = CliRunner().invoke(app, ["--db", str(db), *args], env=env)
+        def run(self, *args, env=None, expect=0, input=None):
+            result = CliRunner().invoke(app, ["--db", str(db), *args], env=env, input=input)
             assert result.exit_code == expect, f"pdh {' '.join(args)} -> {result.exit_code}\n{result.output}{result.stderr or ''}"
             return result
 
@@ -63,8 +63,9 @@ def same_format(ctx):
 def test_groups_and_a_complete_entry(ctx):
     ctx.run("edit", "new-group", "/", "Money", "--apply")
     ctx.run("edit", "new-entry", "Money", "a", "alex", "--url", "https://a.example.org", "--notes", "n", "--tag", "t1",
-            "--tag", "t2", "--expires", "2031-02-03", "--field", "plain=v", "--secret-field", "tok=TOK", "--apply",
-            env={"PDH_NEW_PASSWORD": "pw-a", "TOK": "secret-tok"})
+            "--tag", "t2", "--expires", "2031-02-03", "--field", "plain=v", "--apply")
+    ctx.run("edit", "set", "Money/a", "Password", "-", "--apply", input="pw-a\n")  # secrets come from the hidden prompt
+    ctx.run("edit", "set", "Money/a", "tok", "-", "--protect", "--apply", input="secret-tok\n")
     a = ctx.entry("a")
     assert (a.username, a.password, a.url, a.notes, sorted(a.tags)) == ("alex", "pw-a", "https://a.example.org", "n", ["t1", "t2"])
     assert a.expires and a.expiry_time.date().isoformat() == "2031-02-03"
@@ -77,10 +78,11 @@ def test_groups_and_a_complete_entry(ctx):
 
 def test_attributes_fields_and_clone(ctx):
     ctx.run("edit", "new-group", "/", "Money", "--apply")
-    ctx.run("edit", "new-entry", "Money", "a", "u", "--tag", "x", "--apply", env={"PDH_NEW_PASSWORD": "pw"})
+    ctx.run("edit", "new-entry", "Money", "a", "u", "--tag", "x", "--apply")
+    ctx.run("edit", "set", "Money/a", "Password", "-", "--apply", input="pw\n")
     ctx.run("edit", "set", "Money/a", "Notes", "hello", "--apply")
-    ctx.run("edit", "set", "Money/a", "k", "v1", "--protect", "--apply")
-    ctx.run("edit", "set", "Money/a", "k", "v2", "--overwrite", "--apply")  # protection must survive
+    ctx.run("edit", "set", "Money/a", "k", "-", "--protect", "--apply", input="v1\n")
+    ctx.run("edit", "set", "Money/a", "k", "-", "--overwrite", "--apply", input="v2\n")  # protection must survive
     ctx.run("edit", "tags", "Money/a", "--add", "y", "--remove", "x", "--apply")
     ctx.run("edit", "expiry", "Money/a", "2032-01-01", "--apply")
     ctx.run("edit", "icon", "Money/a", "12", "--apply")
@@ -101,11 +103,11 @@ def test_attributes_fields_and_clone(ctx):
 
 def test_history_and_attachments(ctx, tmp_path):
     ctx.run("edit", "new-group", "/", "G", "--apply")
-    ctx.run("edit", "new-entry", "G", "a", "u", "--apply", env={"PDH_NEW_PASSWORD": "pw-0"})
-    for n in (1, 2):
-        ctx.run("edit", "set", "G/a", "Password", f"pw-{n}", "--overwrite", "--apply")
-    assert [s["changed"] for s in ctx.js("inspect", "history", "G/a")["snapshots"]] == [["Password"], ["Password"]]
-    ctx.run("edit", "history-restore", "G/a", "0", "--apply")
+    ctx.run("edit", "new-entry", "G", "a", "u", "--apply")
+    for n in (0, 1, 2):  # the password comes from the hidden prompt; the empty one the entry started with is snapshot 0
+        ctx.run("edit", "set", "G/a", "Password", "-", "--overwrite", "--apply", input=f"pw-{n}\n")
+    assert [s["changed"] for s in ctx.js("inspect", "history", "G/a")["snapshots"]] == [["Password"]] * 3
+    ctx.run("edit", "history-restore", "G/a", "1", "--apply")
     assert ctx.entry("a").password == "pw-0"
     f = tmp_path / "f.txt"
     f.write_bytes(b"attached bytes")
@@ -152,7 +154,7 @@ def test_delete_restore_purge_and_groups(ctx):
 def test_rename_field_everywhere_and_the_vocabulary(ctx):
     ctx.run("edit", "new-group", "/", "G", "--apply")
     for title in ("a", "b"):
-        ctx.run("edit", "new-entry", "G", title, "u", "--field", "Kundennummer=K1", "--apply", env={"PDH_NEW_PASSWORD": "pw"})
+        ctx.run("edit", "new-entry", "G", title, "u", "--field", "Kundennummer=K1", "--apply")
     ctx.run("edit", "rename-field", "--all", "Kundennummer", "customer_no", "--apply")
     assert all(ctx.entry(t).get_custom_property("customer_no") == "K1" for t in ("a", "b"))
     ctx.run("edit", "vocabulary", "--apply")
@@ -180,10 +182,12 @@ def test_settings_key_derivation_and_password(ctx):
 
 def test_export_import_and_merge(ctx, tmp_path):
     ctx.run("edit", "new-group", "/", "G", "--apply")
-    ctx.run("edit", "new-entry", "G", "a", "u", "--apply", env={"PDH_NEW_PASSWORD": "pw"})
+    ctx.run("edit", "new-entry", "G", "a", "u", "--apply")
+    ctx.run("edit", "set", "G/a", "Password", "-", "--apply", input="pw\n")
     out = tmp_path / "e.csv"
-    ctx.run("io", "export-csv", "--out", str(out), "--with-secrets")
-    assert {r["Title"]: r["Password"] for r in csv.DictReader(open(out, encoding="utf-8"))}.get("a") == "pw"
+    ctx.run("io", "export-csv", "--out", str(out))
+    exported = list(csv.DictReader(open(out, encoding="utf-8")))
+    assert "a" in {r["Title"] for r in exported} and all("Password" not in r for r in exported)  # a review file has no secret
     copy = tmp_path / "copy.kdbx"
     ctx.run("io", "export-kdbx", "--out", str(copy), env={"PDH_NEW_PASSWORD": "copy-pw"})
     assert "a" in [e.title for e in pykeepass_open(copy, "copy-pw", None).entries]

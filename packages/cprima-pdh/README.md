@@ -22,9 +22,9 @@ pykeepass; the method commands (`pdh method ...`) work without it.
 | `pdh session` | `unlock`, `lock`, `status`: cache the master password for a while (Windows DPAPI) |
 | `pdh inspect` | `inventory`, `tree`, `entries` (`--expired`, `--expiring DAYS`), `tags`, `totp`, `find` (`--in-fields`), `show`, `read`, `links`, `unclassified`, `fields`, `history`, `attachments`, `otp` (the current code, never the secret) |
 | `pdh check` | `conform` (the default), `validate`: findings with levels ERROR / WARN / INFO and, per issue, an action; `known-passwords` and `breaches` (online, only with `--online`) |
-| `pdh edit` | `set`, `link`, `rename-field` (one entry or `--all`), `vocabulary`, `new-entry`, `new-group`, `move`, `delete` (to the recycle bin), `restore`, `purge` (only from the bin), `clone`, `tags`, `expiry`, `icon`, `color`, `override-url`, `autotype`, `history-restore`, `history-prune`, `attach`, `detach`, `rename-group`, `move-group`, `delete-group`, `group-notes`, `group-icon`: dry run unless `--apply`; every edit keeps the previous state in the entry's history |
+| `pdh edit` | `set`, `fill` (the secret fields an entry or a group still lacks), `link`, `rename-field` (one entry or `--all`), `vocabulary`, `new-entry`, `new-group`, `move`, `delete` (to the recycle bin), `restore`, `purge` (only from the bin), `clone`, `tags`, `expiry`, `icon`, `color`, `override-url`, `autotype`, `history-restore`, `history-prune`, `attach`, `detach`, `rename-group`, `move-group`, `delete-group`, `group-notes`, `group-icon`: dry run unless `--apply`; every edit keeps the previous state in the entry's history |
 | `pdh db` | `create`, `password`, `keyfile`, `settings`, `kdf`, `empty-bin`: the database itself (dry run unless `--apply`; new passwords from an environment variable or a hidden prompt) |
-| `pdh io` | `import-csv`, `import-kdbx`, `merge` (by UUID and modification time, nothing deleted), `export-csv`, `export-kdbx`, `export-attachment`: the exports are the only writes outside the vault, only to `--out`, never over an existing file |
+| `pdh io` | `import-csv`, `import-xlsx`, `import-kdbx`, `merge` (by UUID and modification time, nothing deleted), `export-csv`, `export-kdbx`, `export-attachment`: the exports are the only writes outside the vault, only to `--out`, never over an existing file |
 | `pdh generate` | a password or passphrase from the system's secure random source; printed, never stored |
 | `pdh method` | `show`, `schemas`: the taxonomy, no vault needed |
 | `pdh backends` | installed backends |
@@ -81,6 +81,47 @@ config, else the config's top-level `backend`, else the file's content. A choice
 for `sops` on a KDBX file is refused ("is a kdbx file, not sops (chosen by ...)"). A file no backend recognises is an error
 that says so, except an empty one, which is treated as KDBX. `pdh backends` lists what is installed, how each kind of file
 is recognised and what each can do, and `pdh doctor` says which backend was chosen and by what.
+
+## Data boundary
+
+pdh works with two kinds of user data and treats them differently.
+
+- **Structure**: group, title, user name, URL, tags, expiry and every field the taxonomy does not mark protected. It may be in
+  plaintext files such as a spreadsheet (CSV).
+- **Secrets**: the standard `Password` and `otp`, every field the taxonomy marks `protected`, every value the vault file itself
+  marks protected, and the secret attributes of the KDBX ecosystem (`otp`, `TOTP Seed`, `TOTP Settings`, `TimeOtp-*`,
+  `HmacOtp-*`, and a passkey's private key). A value counts as a secret if any of these says so.
+
+**pdh never reads a secret from a plaintext file, and never writes one to a plaintext file.** An input file with a column for a
+secret is refused, with the reason and with no way around it. A secret reaches pdh only through a channel that leaves nothing
+at rest: a hidden prompt, pdh's own generator, or an encrypted source such as another vault. A secret is never an argument on
+the command line.
+
+What the line does not cover: free text. pdh cannot know that someone typed a password into a notes field. Key material that
+only decrypts something (a key file, an age identity) is read to open a vault or a sops file and never written by pdh.
+
+The master passphrase of a vault is one secret that opens a store, and it has its own channels: `KDBX_PASSWORD` in the
+environment (as CI systems inject it), or `--password-stdin` (read from standard input, which keeps it out of the
+environment), or a hidden prompt. A history entry's old values are never printed, searched or exported.
+
+`pdh session unlock` caches the master passphrase for a while (30 minutes by default) so later commands do not ask. The cache is
+a file in your profile folder, encrypted with your Windows account's key (DPAPI): it is not plain text, but any process running
+as you can read it, so treat it like a key file. An expired cache is deleted by the next pdh command, and `pdh session lock`
+deletes it at once. It works on Windows only; elsewhere use `KDBX_PASSWORD` or `--password-stdin`.
+
+## Importing a spreadsheet
+
+`pdh io import-csv FILE` reads a CSV file and `pdh io import-xlsx FILE` an `.xlsx` workbook (its first visible sheet, header in
+row 1); each refuses the other's format and names the command to use. Both carry structure only: columns `Group`, `Title` (required), `UserName`, `URL`, `Notes`, `Tags` (`a;b`), `Expires`, and any other column as a
+custom field. A column for a secret is refused (see the data boundary), so a password never travels in the file. The new entries
+come without secrets, and the report says how many secret fields, by the taxonomy, are still to fill. `pdh edit fill PATH`
+(an entry, or a group for everything below it) lists them, and with `--apply` asks for each with a hidden prompt (Enter skips).
+With `--generate` the fields the taxonomy allows to be generated, such as a password for an account you are about to register,
+are generated and stored without being shown: read them in your KeePass client and paste them into the registration form.
+`pdh edit set PATH FIELD -` sets one field. A workbook is read as data only: formulas are not evaluated, and workbooks with
+macros, links to other workbooks, binary (`.xls`, `.xlsb`) or OpenDocument form are refused. Format a column as text in your
+spreadsheet to keep leading zeros or long numbers. `pdh io export-csv` writes the review file: no secret column, and cells a
+spreadsheet would run as a formula are written as text.
 
 ## Safety
 

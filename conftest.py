@@ -13,6 +13,14 @@ Pick an area with pytest's own selection: a path, `-k sops`, or `-m compatibilit
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def never_the_real_session(monkeypatch, tmp_path):
+    """Every pdh call looks at the session file, and an expired one is deleted: no test may reach the owner's real one."""
+    from cprima_pdh import session
+
+    monkeypatch.setattr(session, "SESSION_FILE", tmp_path / "session-for-tests.bin")
+
+
 @pytest.fixture
 def opens_with_the_test_password(monkeypatch):
     """The CLI opens a vault with the testkit's throwaway password instead of asking for one."""

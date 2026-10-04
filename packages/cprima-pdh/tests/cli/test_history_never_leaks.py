@@ -70,16 +70,12 @@ def test_searching_in_fields_does_not_look_into_history(vault):
         assert found == [], f"a search for {old!r} found an entry through its history"
 
 
-@pytest.mark.parametrize("secrets", [False, True])
-def test_an_export_never_contains_history(vault, tmp_path, secrets):
-    out = tmp_path / ("with.csv" if secrets else "without.csv")
-    args = ["io", "export-csv", "--out", str(out), *(["--with-secrets"] if secrets else [])]
-    assert invoke(vault, *args).exit_code == 0
+def test_an_export_never_contains_history_or_a_secret(vault, tmp_path):
+    out = tmp_path / "e.csv"
+    assert invoke(vault, "io", "export-csv", "--out", str(out)).exit_code == 0
     text = out.read_text(encoding="utf-8")
-    for token in (OLD["password"], OLD["password2"], OLD["token"], OLD["serial"], OLD["username"]):
+    for token in (OLD["password"], OLD["password2"], OLD["token"], OLD["serial"], OLD["username"], NOW["password"], NOW["token"]):
         assert token not in text
-    if not secrets:
-        assert NOW["password"] not in text and NOW["token"] not in text
 
 
 def test_the_fixture_really_keeps_the_old_values_in_its_history(vault):

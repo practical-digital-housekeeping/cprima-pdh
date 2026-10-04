@@ -6,20 +6,21 @@ in the entry's history; nothing is deleted because the other copy lacks it.
 """
 from __future__ import annotations
 
-import csv
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable
 
+from . import boundary, secret_fields, spreadsheet
 from .history import _state
 from .models import ImportReport, MergeReport
+from .schema import SchemaSet
 from .txn import Plan, execute_vault
 from .vault import EntryData, Field, GroupData, Vault, as_vault
 from .write import WriteError
 
 _COLUMNS = {  # lower-cased CSV header -> what it is
     "group": "group", "title": "title", "username": "username", "user name": "username", "user_name": "username",
-    "password": "password", "url": "url", "notes": "notes", "tags": "tags", "expires": "expires", "expiry": "expires",
+    "url": "url", "notes": "notes", "tags": "tags", "expires": "expires", "expiry": "expires",
 }
 _EARLIEST = datetime.min.replace(tzinfo=timezone.utc)
 
@@ -75,24 +76,56 @@ def copy_entry(src: Vault, src_entry: EntryData, dest: Vault, dest_group_id: str
 
 # --- import from CSV ----------------------------------------------------------------------------------------------------
 
-def import_csv(open_db: Callable[[], object], db: Path, file: Path, group: str, apply: bool) -> ImportReport:
-    """Add the rows of a CSV file as entries below `group` (created if missing); unknown columns become custom fields."""
+_EXCEL_EPOCH = date(1899, 12, 30)  # day 0 of the 1900 date system, which makes Excel's day numbers come out right after 1900-03-01
+
+
+def _expiry_day(raw: str, from_workbook: bool) -> date:
+    """A date as YYYY-MM-DD; from a workbook also the day number Excel stores for a date cell."""
     try:
-        with open(file, newline="", encoding="utf-8-sig") as f:
-            reader = csv.DictReader(f)
-            header = reader.fieldnames or []
-            raw_rows = list(reader)
-    except OSError as exc:
-        raise WriteError(f"cannot read {file}: {exc.strerror or exc}") from exc
+        return date.fromisoformat(raw)
+    except ValueError:
+        if from_workbook and raw.replace(".", "", 1).isdigit() and 1 <= float(raw) < 2958466:
+            return _EXCEL_EPOCH + timedelta(days=int(float(raw)))
+        raise
+
+
+def import_csv(open_db: Callable[[], object], db: Path, file: Path, group: str, apply: bool,
+               sset: SchemaSet | None = None) -> ImportReport:
+    """Import a CSV file (see `_import_table`). A workbook is refused with the command to use for it."""
+    if Path(file).suffix.lower() == ".xlsx":
+        raise WriteError(f"{Path(file).name} is a workbook: use `pdh io import-xlsx`")
+    return _import_table(open_db, db, file, group, apply, sset, spreadsheet.read_csv)
+
+
+def import_xlsx(open_db: Callable[[], object], db: Path, file: Path, group: str, apply: bool,
+                sset: SchemaSet | None = None) -> ImportReport:
+    """Import the first visible sheet of an .xlsx workbook (see `_import_table`). A CSV file is refused with the command to use."""
+    if Path(file).suffix.lower() == ".csv":
+        raise WriteError(f"{Path(file).name} is a CSV file: use `pdh io import-csv`")
+    return _import_table(open_db, db, file, group, apply, sset, spreadsheet.read_xlsx)
+
+
+def _import_table(open_db: Callable[[], object], db: Path, file: Path, group: str, apply: bool, sset: SchemaSet | None,
+                  read: Callable[[Path], spreadsheet.Table]) -> ImportReport:
+    """Add the rows of a table as entries below `group` (created if missing); unknown columns become custom fields. A column
+    that names a secret refuses the whole file (see `boundary`): secrets are never read from a file. The report says how many
+    secret fields of the new entries are still empty (see `secret_fields`). `read` turns the file into the table."""
+    try:
+        table = read(file)
+    except spreadsheet.SpreadsheetError as exc:
+        raise WriteError(str(exc)) from exc
+    header, raw_rows = table.header, table.rows
+    if secret := boundary.secret_columns(header, sset):
+        raise WriteError(boundary.refusal(secret, Path(file).name))
     kinds = {h: _COLUMNS.get(h.strip().lower()) for h in header}
     if "title" not in kinds.values():
-        raise WriteError("the CSV needs a Title column")
+        raise WriteError(f"{Path(file).name} needs a Title column")
     custom_columns = [h for h, kind in kinds.items() if kind is None and h]
     rows: list[dict] = []
     for number, raw in enumerate(raw_rows, start=2):  # row 1 is the header
         row = {"custom": {}}
         for h, kind in kinds.items():
-            value = (raw.get(h) or "").strip() if kind != "password" and kind != "notes" else (raw.get(h) or "")
+            value = (raw.get(h) or "").strip() if kind != "notes" else (raw.get(h) or "")
             if kind:
                 row[kind] = value
             elif h and value:
@@ -101,7 +134,7 @@ def import_csv(open_db: Callable[[], object], db: Path, file: Path, group: str, 
             raise WriteError(f"row {number}: the title is empty")
         if row.get("expires"):
             try:
-                row["day"] = date.fromisoformat(row["expires"])
+                row["day"] = _expiry_day(row["expires"], table.kind == "xlsx")
             except ValueError:
                 raise WriteError(f"row {number}: {row['expires']!r} is not a date (YYYY-MM-DD)") from None
         row["path"] = tuple(_parts(group) + _parts(row.get("group", "")))
@@ -110,7 +143,7 @@ def import_csv(open_db: Callable[[], object], db: Path, file: Path, group: str, 
     for row in rows:
         key = (row["path"], row["title"])
         if key in seen:
-            raise WriteError(f"the CSV has the title {row['title']!r} twice in {'/'.join(row['path']) or '/'}")
+            raise WriteError(f"{Path(file).name} has the title {row['title']!r} twice in {'/'.join(row['path']) or '/'}")
         seen.add(key)
 
     def build(vault: Vault) -> Plan:
@@ -118,8 +151,9 @@ def import_csv(open_db: Callable[[], object], db: Path, file: Path, group: str, 
             existing = _find_group(vault, list(row["path"]))
             if existing is not None and any(e.title == row["title"] for e in _entries_in(vault, existing.id)):
                 raise WriteError(f"{'/'.join(row['path']) or '/'!r} already has an entry {row['title']!r}")
-        report = ImportReport(kind="csv", source=str(file), entries=len(rows),
-                              groups=_new_paths(vault, {r["path"] for r in rows}), columns=custom_columns)
+        report = ImportReport(kind=table.kind, source=str(file), entries=len(rows),
+                              groups=_new_paths(vault, {r["path"] for r in rows}), columns=custom_columns,
+                              secrets_to_fill=sum(_to_fill(r, sset) for r in rows))
         if not rows:
             return Plan(change=report)
 
@@ -145,6 +179,14 @@ def import_csv(open_db: Callable[[], object], db: Path, file: Path, group: str, 
         return Plan(change=report, mutate=mutate, count_delta=len(rows), verify=verify)
 
     return execute_vault(open_db, db, build, apply)
+
+
+def _to_fill(row: dict, sset: SchemaSet | None) -> int:
+    """How many secret fields the entry this row makes will still lack: all of them, as no file brings a secret."""
+    entry = EntryData(id="", group_path="", title=row["title"], fields={n: Field(v, False) for n, v in row["custom"].items()})
+    if sset is None:
+        return 1  # without a taxonomy: the password every login has
+    return len(secret_fields.missing(entry, sset))
 
 
 # --- import from another vault -----------------------------------------------------------------------------------------------

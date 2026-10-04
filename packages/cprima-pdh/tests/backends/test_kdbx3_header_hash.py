@@ -64,7 +64,7 @@ def test_save_vault_keeps_the_header_hash_of_a_kdbx3_file_valid(work):
 def test_every_pdh_write_command_leaves_a_valid_kdbx3_file(work):
     invoke(work, "edit", "new-group", "/", "Money", "--apply")
     assert stored_hash(work, T3.password) == actual_header_hash(work)
-    invoke(work, "edit", "new-entry", "Money", "a", "alex", "--tag", "x", "--apply", env={"PDH_NEW_PASSWORD": "pw"})
+    invoke(work, "edit", "new-entry", "Money", "a", "alex", "--tag", "x", "--apply")
     invoke(work, "edit", "delete", "Money/a", "--apply")
     invoke(work, "db", "settings", "--name", "Work", "--apply")
     assert stored_hash(work, T3.password) == actual_header_hash(work)

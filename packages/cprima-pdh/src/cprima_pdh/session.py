@@ -1,7 +1,9 @@
 """Session credential cache (Windows DPAPI, bound to the current user).
 
-Blob lives in %LOCALAPPDATA%\\cprima-pdh\\session.bin with db path and expiry.
-Expiry is enforced here, not cryptographically; run `pdh session lock` when done.
+Blob lives in %LOCALAPPDATA%\\cprima-pdh\\session.bin with db path and expiry. The passphrase is never in the file as plain
+text: it is encrypted with the current Windows user's key, so another user or a stolen disk cannot read it, but any process
+running as the same user can. Expiry is enforced here, not cryptographically: an expired blob is deleted by the next pdh
+call of any kind, and `pdh session lock` deletes it at once. Windows only; elsewhere use KDBX_PASSWORD or --password-stdin.
 """
 from __future__ import annotations
 
@@ -35,6 +37,11 @@ def _dpapi(data: bytes, protect: bool) -> bytes:
         ctypes.windll.kernel32.LocalFree(out.pbData)
 
 
+def supported() -> bool:
+    """Whether the session cache can work here: it needs Windows DPAPI."""
+    return os.name == "nt"
+
+
 def _norm(path: str | Path) -> str:
     return os.path.normcase(str(Path(path).resolve()))
 
@@ -42,7 +49,7 @@ def _norm(path: str | Path) -> str:
 def _read() -> dict | None:
     try:
         return json.loads(_dpapi(SESSION_FILE.read_bytes(), protect=False))
-    except (OSError, ValueError):
+    except (OSError, ValueError, AttributeError):  # (AttributeError: no ctypes.windll off Windows)
         return None
 
 
@@ -73,7 +80,10 @@ def save_session(db: str | Path, password: str | None, keyfile: str | Path | Non
 def current_vault() -> Path | None:
     """The vault the valid session was unlocked for (paths are not secret), else None."""
     data = _read()
-    if data is None or data.get("expires", 0) < time.time() or not data.get("db"):
+    if data is not None and data.get("expires", 0) < time.time():
+        lock()  # every pdh call looks here first, so an expired blob does not stay on disk
+        return None
+    if data is None or not data.get("db"):
         return None
     return Path(data["db"])
 

@@ -31,10 +31,10 @@ def empty(tmp_path):
 # --- import-csv -------------------------------------------------------------------------------------------------------
 
 CSV = (
-    "Group,Title,UserName,Password,URL,Notes,Tags,Expires,account_no\n"
-    "Money/Cards,Visa,alex,pw-visa,https://visa.example.org,n1,a;b,2031-01-02,4711\n"
-    "Money,Bank,sam,pw-bank,,,,,\n"
-    ",Loose,x,pw-loose,,,,,\n"
+    "Group,Title,UserName,URL,Notes,Tags,Expires,account_no\n"
+    "Money/Cards,Visa,alex,https://visa.example.org,n1,a;b,2031-01-02,4711\n"
+    "Money,Bank,sam,,,,,\n"
+    ",Loose,x,,,,,\n"
 )
 
 
@@ -44,11 +44,10 @@ def test_a_csv_is_imported_with_groups_tags_expiry_and_extra_columns(empty, tmp_
     before = empty.read_bytes()
     plan = data(empty, "io", "import-csv", str(f), "--group", "Imported")
     assert plan["applied"] is False and plan["entries"] == 3 and plan["columns"] == ["account_no"] and empty.read_bytes() == before
-    assert "pw-visa" not in json.dumps(plan)
     assert data(empty, "io", "import-csv", str(f), "--group", "Imported", "--apply")["applied"] is True
     kp = load(empty)
     visa = next(e for e in kp.entries if e.title == "Visa")
-    assert "/".join(visa.group.path) == "Imported/Money/Cards" and visa.password == "pw-visa"
+    assert "/".join(visa.group.path) == "Imported/Money/Cards" and not visa.password  # a file never carries a secret
     assert visa.tags == ["a", "b"] and visa.expiry_time.date().isoformat() == "2031-01-02"
     assert visa.get_custom_property("account_no") == "4711" and visa.url == "https://visa.example.org"
     assert "/".join(next(e for e in kp.entries if e.title == "Loose").group.path) == "Imported"
@@ -74,11 +73,11 @@ def test_a_title_that_exists_in_the_target_group_refuses_the_import(empty, tmp_p
 def test_export_then_import_round_trips(tmp_path, empty):
     src = messy_vault(tmp_path / "m.kdbx").path
     out = tmp_path / "e.csv"
-    assert invoke(src, "io", "export-csv", "--out", str(out), "--with-secrets").exit_code == 0
+    assert invoke(src, "io", "export-csv", "--out", str(out)).exit_code == 0  # the export carries no secrets, so it can come back in
     assert invoke(empty, "io", "import-csv", str(out), "--group", "Back", "--apply").exit_code == 0
     kp = load(empty)
     got = next(e for e in kp.entries if e.title == "With history")
-    assert got.password == "pw-3" and got.url == "https://h.example.org"
+    assert not got.password and got.url == "https://h.example.org"  # structure round-trips; the secret does not
 
 
 # --- import-kdbx --------------------------------------------------------------------------------------------------------
