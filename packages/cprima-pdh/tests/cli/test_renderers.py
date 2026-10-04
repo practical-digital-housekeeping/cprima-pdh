@@ -105,6 +105,7 @@ def test_session_lock_reports_through_the_renderer(run, monkeypatch):
 def test_session_unlock_reports_through_the_renderer(tmp_path, monkeypatch):
     vault = synthetic_vault(tmp_path / "v.kdbx", [Entry("x")])
     saved = {}
+    monkeypatch.setattr(session, "supported", lambda: True)  # the renderer is under test, not the platform
     monkeypatch.setattr(session, "save_session", lambda *a: saved.setdefault("args", a))
     monkeypatch.setattr("cprima_pdh.cli._common.prompt_password", lambda: "pdh-test-password")
     result = CliRunner().invoke(app, ["--db", str(vault), "session", "unlock", "--minutes", "5", "-f", "json"])
