@@ -214,7 +214,7 @@ wheels = [
 
 [[package]]
 name = "cprima-pdh"
-version = "0.0.4"
+version = "0.0.5"
 source = { editable = "packages/cprima-pdh" }
 dependencies = [
     { name = "lxml" },
