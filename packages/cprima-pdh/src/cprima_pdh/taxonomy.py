@@ -22,7 +22,8 @@ def _table(header: list[str], rows: list[list[object]]) -> list[str]:
 
 
 def _protection(ft: FieldType) -> str:
-    return {True: "must be protected", False: "must not be protected", None: "not checked"}[ft.protected]
+    text = {True: "must be protected", False: "must not be protected", None: "not checked"}[ft.protected]
+    return text + ("; may be generated" if ft.generate else "")
 
 
 def _links(d: SchemaDef) -> str:
@@ -136,7 +137,8 @@ def build(sset: SchemaSet) -> TaxonomyDoc:
         out += ["## Standard fields", "",
                 "What every entry has. How a store keeps them is the backend's business.", ""]
         out += _table(["Field", "Kind", "Meaning"],
-                      [[f"`{n}`", s.kind, s.description] for n, s in sset.standard.items()]) + [""]
+                      [[f"`{n}`", s.kind, s.description + (" May be generated." if s.generate else "")]
+                       for n, s in sset.standard.items()]) + [""]
 
     # --- kinds and vocabulary
     if sset.kinds:

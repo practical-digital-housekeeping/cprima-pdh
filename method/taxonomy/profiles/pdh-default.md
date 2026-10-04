@@ -217,7 +217,7 @@ What every entry has. How a store keeps them is the backend's business.
 |---|---|---|
 | `Title` | text | The entry's title. |
 | `UserName` | text | The user name of a login. |
-| `Password` | secret | The password of a login. |
+| `Password` | secret | The password of a login. May be generated. |
 | `URL` | url | The web address of a login. |
 | `Notes` | text | Free-form notes. |
 | `otp` | otp | The one-time-password secret (TOTP/HOTP) of an entry. |
@@ -261,7 +261,7 @@ What every entry has. How a store keeps them is the backend's business.
 | `PIN` | implemented | Numeric PIN or PUK. | — | must be protected | `[0-9]{4,8}` | `telecom`, `finance`, `identity` |
 | `license_key` | implemented | Software licence key. | — | must be protected | — | `keys` |
 | `PUK` | implemented | SIM unlock code (PUK). | — | must be protected | `[0-9]{8}` | `telecom` |
-| `wifi_key` | implemented | Wi-Fi password. | — | must be protected | — | `device` |
+| `wifi_key` | implemented | Wi-Fi password. | — | must be protected; may be generated | — | `device` |
 | `api_key` | implemented | API key. | — | must be protected | — | `keys`, `access` |
 | `api_secret` | implemented | API secret. | — | must be protected | — | `keys`, `access` |
 | `client_secret` | implemented | OAuth/API client secret. | — | must be protected | — | `keys`, `access` |

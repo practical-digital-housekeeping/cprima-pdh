@@ -21,7 +21,8 @@ def vault(tmp_path):
         Entry("ap", group="Home", custom={BINDING: "wifi-access-point"}),         # wifi_key and Password to fill
         Entry("site", group="Home"),                                               # untyped: Password to fill
         Entry("done", group="Home", password="already-set"),                       # nothing to fill
-        Entry("card", group="Cards", custom={BINDING: "credit-card"}),             # card_number, PIN, CVV to fill
+        Entry("card", group="Cards", custom={BINDING: "credit-card"}),             # card_number, PIN, CVV to fill: all typed
+        Entry("router", group="Net", custom={BINDING: "openwrt-device"}),          # Password (generated) and ssh_key (typed)
         Entry("trashed", group="Home"),                                            # in the bin: left alone
     ])
     kp = pykeepass_open(db, DEFAULT_PASSWORD, None)
@@ -60,10 +61,13 @@ def test_a_dry_run_lists_what_is_missing_and_asks_nothing(vault):
 
 
 def test_a_dry_run_says_which_fields_would_be_generated(vault):
-    r = report(fill(vault, "Cards", "--generate"))
-    how = {i["field"]: i["how"] for i in r["items"]}
-    assert how["card_number"] == "to type" and how["CVV"] == "to type"  # issued elsewhere: only typed
-    assert how["PIN"] == "to generate"
+    how = {i["field"]: i["how"] for i in report(fill(vault, "Net", "--generate"))["items"]}
+    assert how == {"Password": "to generate", "ssh_key": "to type"}  # a key is typed, a password is made up
+
+
+def test_a_card_is_never_generated_because_everything_on_it_comes_from_the_bank(vault):
+    how = {i["field"]: i["how"] for i in report(fill(vault, "Cards", "--generate"))["items"]}
+    assert how == {"card_number": "to type", "PIN": "to type", "CVV": "to type"}
 
 
 def test_the_text_layout_says_it_was_a_dry_run(vault):
@@ -104,10 +108,16 @@ def test_a_group_is_filled_below_it_and_what_is_set_or_in_the_bin_is_left_alone(
 
 
 def test_without_a_terminal_only_what_may_be_generated_is_filled_and_the_rest_is_reported_skipped(vault):
-    r = report(fill(vault, "Cards", "--generate", "--apply"))
-    assert r["generated"] == 1 and r["skipped"] == 2 and r["typed"] == 0
-    card = entry(vault, "card")
-    assert card.get_custom_property("PIN") and not card.get_custom_property("card_number")
+    r = report(fill(vault, "Net", "--generate", "--apply"))
+    assert r["generated"] == 1 and r["skipped"] == 1 and r["typed"] == 0
+    router = entry(vault, "router")
+    assert router.password and not router.get_custom_property("ssh_key")
+
+
+def test_nothing_that_comes_from_outside_is_generated_so_without_a_terminal_nothing_is_written(vault):
+    before = vault.read_bytes()
+    result = fill(vault, "Cards", "--generate", "--apply")  # PIN, card number and CVV can only be typed
+    assert result.exit_code == 2 and "no terminal to ask on" in result.stderr and vault.read_bytes() == before
 
 
 # --- typing -------------------------------------------------------------------------------------------------------------
@@ -121,11 +131,18 @@ def test_a_secret_is_typed_at_a_hidden_prompt_in_the_taxonomys_order_and_enter_s
 
 
 def test_typed_and_generated_fields_mix(vault, terminal):
-    r = report(fill(vault, "Cards", "--generate", "--apply", input="4111-1111\n987\n"))  # card_number and CVV typed, PIN made
-    assert (r["typed"], r["generated"]) == (2, 1)
+    r = report(fill(vault, "Net", "--generate", "--apply", input="ssh-key-material-unique\n"))  # the key typed, the password made
+    assert (r["typed"], r["generated"]) == (1, 1)
+    router = entry(vault, "router")
+    assert router.get_custom_property("ssh_key") == "ssh-key-material-unique" and router.is_custom_property_protected("ssh_key")
+    assert router.password not in ("", "ssh-key-material-unique") and len(router.history) == 1
+
+
+def test_a_card_is_typed_field_by_field_at_the_prompt(vault, terminal):
+    r = report(fill(vault, "Cards", "--generate", "--apply", input="4111-1111\n1234\n987\n"))
+    assert (r["typed"], r["generated"]) == (3, 0)
     card = entry(vault, "card")
-    assert (card.get_custom_property("card_number"), card.get_custom_property("CVV")) == ("4111-1111", "987")
-    assert card.get_custom_property("PIN") not in ("", "4111-1111", "987") and len(card.history) == 1
+    assert [card.get_custom_property(f) for f in ("card_number", "PIN", "CVV")] == ["4111-1111", "1234", "987"]
 
 
 def test_a_typed_value_is_never_in_any_output(vault, terminal):

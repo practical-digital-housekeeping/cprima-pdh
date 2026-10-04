@@ -72,6 +72,7 @@ class FieldType(_Strict):
     match: str | None = None  # regex searched in the field name
     pattern: str | None = None  # the value must match completely (name/aliases only)
     protected: bool | None = None
+    generate: bool = False  # pdh may generate its value: a secret the owner makes up, never one issued by someone else
     example: str | None = None  # an obviously fake value for samples and docs; must fit `pattern`; else the kind's
 
 
@@ -145,6 +146,7 @@ class StandardDef(_Strict):
 
     kind: str  # one of the taxonomy's `[kind.*]`
     description: str = ""
+    generate: bool = False  # pdh may generate its value (the password of a login)
     example: str | None = None  # an obviously fake value; else the kind's
 
 

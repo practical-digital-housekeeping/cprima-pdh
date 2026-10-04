@@ -82,6 +82,7 @@ description = "The user name of a login."
 [standard.Password]
 example = "example-password"
 kind = "secret"
+generate = true
 description = "The password of a login."
 
 [standard.URL]
@@ -749,6 +750,7 @@ description = "Wi-Fi password."
 kind = "secret"
 family = ["device"]
 protected = true
+generate = true
 
 [field.contract_no]
 description = "Contract or contract account number."

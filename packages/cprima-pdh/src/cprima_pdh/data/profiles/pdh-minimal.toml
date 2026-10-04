@@ -32,6 +32,7 @@ description = "The user name of a login."
 
 [standard.Password]
 kind = "secret"
+generate = true
 example = "example-password"
 description = "The password of a login."
 

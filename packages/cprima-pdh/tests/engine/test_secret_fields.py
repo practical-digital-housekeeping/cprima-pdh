@@ -33,10 +33,26 @@ def test_the_password_is_one_secret_field_among_the_others_in_the_taxonomys_orde
     assert names(typed("credit-card")) == ["card_number", "PIN", "CVV"]
 
 
-def test_a_field_is_generatable_only_when_the_taxonomy_calls_it_a_secret_not_something_issued():
+def test_a_field_is_generatable_only_when_the_taxonomy_opts_it_in():
     by_name = {f.name: f.generatable for f in secret_fields.secret_fields(typed("credit-card"), SSET)}
-    assert by_name["card_number"] is False and by_name["CVV"] is False  # issued by the bank: it can only be typed
+    assert by_name == {"card_number": False, "PIN": False, "CVV": False}  # issued by the bank: only typed
     assert {f.name: f.generatable for f in secret_fields.secret_fields(typed("website"), SSET)}["Password"] is True
+    assert {f.name: f.generatable for f in secret_fields.secret_fields(typed("wifi-access-point"), SSET)} == {
+        "wifi_key": True, "Password": True}  # the access point's secret and its admin's password are made up
+
+
+@pytest.mark.parametrize("schema,field", [("sim-card", "PIN"), ("sim-card", "PUK"), ("onlineshop", "license_key"),
+                                          ("hsm", "so_pin"), ("openwrt-device", "ssh_key")])
+def test_what_comes_from_outside_is_never_generatable(schema, field):
+    by_name = {f.name: f.generatable for f in secret_fields.secret_fields(typed(schema), SSET)}
+    assert by_name[field] is False
+
+
+def test_only_the_terms_the_taxonomy_opts_in_are_generatable_anywhere_in_the_profile():
+    opted = {n for n, ft in SSET.fields.items() if ft.generate} | {n for n, s in SSET.standard.items() if s.generate}
+    assert opted == {"wifi_key", "Password"}
+    found = {f.name for schema in SSET.schemas for f in secret_fields.secret_fields(typed(schema), SSET) if f.generatable}
+    assert found <= opted
 
 
 @pytest.mark.parametrize("schema", sorted(SSET.schemas))

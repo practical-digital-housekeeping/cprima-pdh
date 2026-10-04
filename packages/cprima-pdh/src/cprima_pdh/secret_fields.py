@@ -36,13 +36,15 @@ def _is_secret(name: str, schema_protected: list[str], sset: SchemaSet) -> bool:
 
 
 def _generatable(name: str, types: dict[str, str], sset: SchemaSet, exact, matchers) -> bool:
+    """Whether the taxonomy lets pdh generate this field: it opts a term in with `generate = true`. A PIN, a PUK, a licence key
+    or an API key is issued by someone else and is never generated, whatever its kind."""
     if name in STANDARD:
         standard = sset.standard.get(name)
-        return standard is not None and standard.kind == "secret"
+        return standard is not None and standard.generate
     if name in types and types[name] in sset.fields:
-        return sset.fields[types[name]].kind == "secret"
+        return sset.fields[types[name]].generate
     found = lookup_term(name, exact, matchers)
-    return found is not None and found[1].kind == "secret"
+    return found is not None and found[1].generate
 
 
 def secret_fields(entry: EntryData, sset: SchemaSet) -> list[SecretField]:

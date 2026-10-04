@@ -179,12 +179,17 @@ def test_fill_generates_what_is_missing_stores_it_and_returns_no_secret(db, caps
 
 def test_fill_reports_what_it_cannot_generate_and_leaves_what_is_set_alone(tmp_path):
     db = synthetic_vault(tmp_path / "v.kdbx", [Entry("card", group="Cards", custom={BINDING: "credit-card"}),
+                                                Entry("router", group="Cards", custom={BINDING: "openwrt-device"}),
                                                 Entry("done", group="Cards", password="keep-me")])
     with writing(db) as v:
         result = v.fill("Cards")
-        assert {f for _, f in result.still_missing} == {"card_number", "CVV"}
+        # a card's number, PIN and CVV and a router's ssh key come from outside: only typed, so only reported
+        assert {f for _, f in result.still_missing} == {"card_number", "PIN", "CVV", "ssh_key"}
+        assert result.filled == 1  # the router's password, made up
         assert v.secret("Cards/done").get_secret_value() == "keep-me"
-        assert v.secret("Cards/card", "PIN").get_secret_value()
+        assert v.secret("Cards/router").get_secret_value()
+        with pytest.raises(SecretNotSet):
+            v.secret("Cards/card", "PIN")  # never generated
 
 
 def test_set_secret_stores_it_protected_keeps_the_old_value_in_the_history_and_masks_the_new_one(db):

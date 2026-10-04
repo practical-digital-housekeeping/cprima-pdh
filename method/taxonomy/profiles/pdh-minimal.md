@@ -71,7 +71,7 @@ What every entry has. How a store keeps them is the backend's business.
 |---|---|---|
 | `Title` | text | The entry's title. |
 | `UserName` | text | The user name of a login. |
-| `Password` | secret | The password of a login. |
+| `Password` | secret | The password of a login. May be generated. |
 | `URL` | url | The web address of a login. |
 | `Notes` | text | Free-form notes. |
 | `otp` | otp | The one-time-password secret of an entry. |
