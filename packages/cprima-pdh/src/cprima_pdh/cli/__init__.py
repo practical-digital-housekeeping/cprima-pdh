@@ -51,6 +51,9 @@ def main(
     profile: Annotated[Optional[str], typer.Option("--profile", envvar="PDH_PROFILE",
                                                    help="The taxonomy profile (env PDH_PROFILE); see "
                                                         "`pdh method profiles`.")] = None,
+    backend: Annotated[Optional[str], typer.Option("--backend", envvar="PDH_BACKEND",
+                                                   help="The kind of vault (env PDH_BACKEND), instead of telling it from "
+                                                        "the file; see `pdh backends`.")] = None,
     schemas: Annotated[Optional[Path], typer.Option("--schemas", envvar="PDH_SCHEMAS", exists=True, dir_okay=False,
                                                     help="One taxonomy file instead of a profile (env PDH_SCHEMAS).")] = None,
     version: Annotated[Optional[bool], typer.Option("--version", callback=_version, is_eager=True,
@@ -58,7 +61,8 @@ def main(
 ) -> None:
     """Practical Digital Housekeeping: keep your digital life in order, starting with your password database.
 
-    The vault: --db, else --vault/PDH_VAULT (a name in the config), else KDBX_FILE, else the config's default,
+    The backend (kdbx, sops, ...): --backend/PDH_BACKEND, else the vault's own `backend` in the config, else the
+    config's `backend`, else the file's content; a choice the file contradicts is refused. The vault: --db, else --vault/PDH_VAULT (a name in the config), else KDBX_FILE, else the config's default,
     else the vault of the unlocked session. The profile: --profile/PDH_PROFILE, else the vault's own `profile` in the
     config, else the config's `profile`, else `pdh-default`. Config files: ~/.config/cprima-pdh/config.toml, ./pdh.toml,
     $PDH_CONFIG."""
@@ -76,8 +80,14 @@ def main(
         chosen, origin = resolved.profile, resolved.profile_source
     else:
         chosen, origin = profiles.DEFAULT, ""
+    choices: list[tuple[str, str]] = []
+    if backend is not None:
+        from_env = getattr(ctx.get_parameter_source("backend"), "name", "") == "ENVIRONMENT"
+        choices.append((backend, "PDH_BACKEND" if from_env else "--backend"))
+    if resolved.backend:
+        choices.append((resolved.backend, resolved.backend_source))
     ctx.obj = c.AppState(db=resolved.db, key=resolved.key, schemas=schemas, profile=chosen, profile_origin=origin,
-                         vault_source=resolved.source)
+                         vault_source=resolved.source, backend_choices=tuple(choices))
 
 
 @app.command()
@@ -87,7 +97,11 @@ def doctor(ctx: typer.Context, fmt: c.Fmt = Format.text) -> None:
     st = c.state(ctx)
 
     def open_unlocked(db: Path):
-        if source_mod.file_kind(db) == "sops":  # an age identity instead of a password; errors reach the report
+        try:
+            kind = backends.select(db, st.backend_choices).name
+        except backends.BackendMissing:
+            return None  # the report names the problem (setup / backend)
+        if kind == "sops":  # an age identity instead of a password; errors reach the report
             from ..backends import age
             from ..backends.sops import SopsVault, default_identities
 
@@ -95,10 +109,11 @@ def doctor(ctx: typer.Context, fmt: c.Fmt = Format.text) -> None:
         # only with a sidecar password or a session: doctor never prompts
         if source_mod.sidecar(db) is None and session_mod.load_session(db) is None:
             return None
-        return c.open_db(db, st.key)
+        return c.open_kdbx(st, db)
 
     report = doctor_mod.diagnose(st.db, lambda: c.read_taxonomy(st), c.taxonomy_source(st), open_unlocked,
-                                 vault_source=st.vault_source, taxonomy_origin=c.taxonomy_origin(st))
+                                 vault_source=st.vault_source, taxonomy_origin=c.taxonomy_origin(st),
+                                 backend_choices=st.backend_choices)
     c.emit(report, fmt)
     if report.failed:
         raise typer.Exit(1)
@@ -106,6 +121,8 @@ def doctor(ctx: typer.Context, fmt: c.Fmt = Format.text) -> None:
 
 @app.command("backends")
 def list_backends(fmt: c.Fmt = Format.text) -> None:
-    """List the installed backends and whether their dependencies are present."""
-    c.emit(BackendList(backends=[BackendRow(name=b.name, ready=b.available, detail=b.detail)
+    """The kinds of vault pdh knows: whether their dependencies are present, how a file of each kind is recognised, and
+    what each can do. Choose one with --backend (env PDH_BACKEND) or `backend` in the config."""
+    c.emit(BackendList(backends=[BackendRow(name=b.name, ready=b.available, detail=b.detail,
+                                              detection=b.detection, capabilities=list(b.capabilities))
                                  for b in backends.available()]), fmt)

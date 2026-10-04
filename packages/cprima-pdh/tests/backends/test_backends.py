@@ -1,6 +1,4 @@
 """Backends are entry-point plugins behind extras; a missing one is reported with its install line."""
-from pathlib import Path
-
 import pytest
 from typer.testing import CliRunner
 
@@ -17,10 +15,6 @@ def test_version_names_the_method():
 
 def test_kdbx_backend_is_registered_as_an_entry_point():
     assert "kdbx" in {b.name for b in backends.available()}
-
-
-def test_backend_is_chosen_by_suffix():
-    assert backends.for_path(Path("Vault.KDBX")) == "kdbx"
 
 
 def test_an_unknown_backend_names_its_install_line():

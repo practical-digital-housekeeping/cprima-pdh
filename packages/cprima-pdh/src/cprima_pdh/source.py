@@ -31,26 +31,6 @@ class OpenError(Exception):
     pass
 
 
-_KDBX_SIGNATURE = bytes.fromhex("03d9a29a67fb4bb5")
-
-
-def file_kind(path: Path) -> str:
-    """"kdbx" or "sops", from the file content (extensions lie): the KDBX signature, else a sops block in JSON or YAML."""
-    try:
-        head = Path(path).read_bytes()[:4096]
-    except OSError:
-        return "kdbx"  # let the opener report the problem
-    if head[:8] == _KDBX_SIGNATURE:
-        return "kdbx"
-    try:
-        whole = Path(path).read_text(encoding="utf-8")
-    except (OSError, UnicodeDecodeError):
-        return "kdbx"
-    json_like = whole.lstrip().startswith("{") and '"sops"' in whole
-    yaml_like = any(line.startswith("sops:") for line in whole.splitlines())
-    return "sops" if json_like or yaml_like else "kdbx"
-
-
 def sidecar(path: Path) -> Path | None:
     """`<vault>.toml` next to the vault if it holds a `password` (test fixtures do), else None."""
     import tomllib

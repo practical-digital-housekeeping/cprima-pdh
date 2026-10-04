@@ -31,7 +31,7 @@ def _guarded(action):
 def _kp(ctx: typer.Context):
     """The vault of the command (any backend); the engine reads it through its snapshots."""
     st = c.state(ctx)
-    return c.open_vault(c.require_db(st), st.key)
+    return c.open_vault(st, c.require_db(st), st.key)
 
 
 def _kdbx(ctx: typer.Context, capability: str):

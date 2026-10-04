@@ -32,6 +32,7 @@ class AppState:
     profile: str = profiles.DEFAULT
     profile_origin: str = ""  # where the profile came from; empty = the built-in default
     vault_source: str = "none"  # where the vault came from (--db, KDBX_FILE, config, session)
+    backend_choices: tuple[tuple[str, str], ...] = ()  # explicit backend choices as (name, source), highest priority first
 
 
 def state(ctx: typer.Context) -> AppState:
@@ -77,10 +78,17 @@ def require_backend(name: str = "kdbx") -> None:
         fail(f"pdh: {exc}")
 
 
+def select_backend(st: AppState, db: Path) -> backends.Selection:
+    """Which backend works on `db`, and where that choice came from; a refusal (a choice the file contradicts, a file no
+    backend recognises) ends the command with the message."""
+    try:
+        return backends.select(db, st.backend_choices)
+    except backends.BackendMissing as exc:
+        fail(f"pdh: {exc}")
+
+
 def open_db(db: Path, key: Path | None):
     """Open a KDBX vault (session cache first, else prompt). Tests replace this function."""
-    if source.file_kind(db) == "sops":
-        fail("this is a sops file: pdh can read it (inspect, check) but writing sops files is not implemented yet", 2)
     require_backend("kdbx")
     try:
         return source.open_db(db, key, prompt_password)
@@ -88,12 +96,22 @@ def open_db(db: Path, key: Path | None):
         fail(f"open failed: {exc}", 1)
 
 
-def open_vault(db: Path, key: Path | None):
-    """The vault as the engine sees it: a KDBX file through the kdbx backend, a sops file through the sops backend.
-    For a sops file `key` is the age identity file (else SOPS_AGE_KEY / SOPS_AGE_KEY_FILE, as with sops itself)."""
+def open_kdbx(st: AppState, db: Path):
+    """Open a KDBX vault for a command that changes or exports it. Another backend is refused with the reason: those
+    commands exist for KDBX only (a sops file is read by the inspect and check commands)."""
+    chosen = select_backend(st, db)
+    if chosen.name != "kdbx":
+        fail(f"the {chosen.name} backend can be read (inspect, check) but this command does not support it yet", 2)
+    return open_db(db, st.key)
+
+
+def open_vault(st: AppState, db: Path, key: Path | None):
+    """The vault as the engine sees it, through the backend selected for it (a KDBX file through the kdbx backend, a sops
+    file through the sops backend). For a sops file `key` is the age identity file (else SOPS_AGE_KEY /
+    SOPS_AGE_KEY_FILE, as with sops itself)."""
     from ..vault import as_vault
 
-    if source.file_kind(db) == "sops":
+    if select_backend(st, db).name == "sops":
         require_backend("sops")
         from ..backends import age
         from ..backends.sops import SopsVault, default_identities

@@ -67,9 +67,20 @@ vault of the unlocked session. Config files, later ones overriding earlier ones:
 
 ```toml
 default = "<name>"
+backend = "kdbx"                      # optional: the kind of vault for every vault
 [vaults.<name>]
 path = "relative/or/absolute.kdbx"
+backend = "sops"                      # optional: this vault is of this kind
 ```
+
+## Which backend
+
+Usually nothing needs saying: pdh looks at the file (the KDBX signature, a `sops` block), and an extension does not
+matter. To say it anyway, first match wins: `--backend NAME`, else `PDH_BACKEND`, else the vault's own `backend` in the
+config, else the config's top-level `backend`, else the file's content. A choice is always checked against the file: asking
+for `sops` on a KDBX file is refused ("is a kdbx file, not sops (chosen by ...)"). A file no backend recognises is an error
+that says so, except an empty one, which is treated as KDBX. `pdh backends` lists what is installed, how each kind of file
+is recognised and what each can do, and `pdh doctor` says which backend was chosen and by what.
 
 ## Safety
 

@@ -114,22 +114,24 @@ class _Report:
 
 def diagnose(db: Path | None, taxonomy: Callable[[], object], taxonomy_source: str,
              open_unlocked: Callable[[Path], object | None], vault_source: str = "--db",
-             taxonomy_origin: str = "") -> DoctorReport:
+             taxonomy_origin: str = "", backend_choices: tuple = ()) -> DoctorReport:
     """`taxonomy()` loads the taxonomy (raises on error); `open_unlocked(db)` returns the opened vault only when a
     session is unlocked for it, else None. It must never prompt."""
     r = _Report()
 
     # --- setup
     r.add("setup", "pdh", "ok", f"{__version__} (cprima-pdh), Python {platform.python_version()}")
-    from .source import file_kind
-
-    kind = file_kind(db) if db is not None and db.is_file() else "kdbx"  # the backend follows the file
     try:
+        chosen = backends.select(db, backend_choices) if db is not None and db.is_file() else backends.Selection(
+            backends.BUILT_IN_DEFAULT, "built-in default (no vault file)")
+        kind = chosen.name
         backends.load(kind)
-        r.add("setup", "backend", "ok", f"{kind} ready")
+        r.add("setup", "backend", "ok", f"{kind} ready (from {chosen.source})")
         kdbx_ready = True
     except backends.BackendMissing as exc:
-        r.add("setup", "backend", "fail", f"{kind} not installed", str(exc).split("install it with: ")[-1])
+        kind = "the selected"
+        r.add("setup", "backend", "fail", str(exc).split("; install it with: ")[0], str(exc).split("install it with: ")[-1]
+              if "install it with: " in str(exc) else "choose one with --backend NAME")
         kdbx_ready = False
     sset = None
     try:

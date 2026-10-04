@@ -29,6 +29,22 @@ _NAMESPACE = uuid.UUID("2f8a8a7e-5f4b-4f0e-9a39-7d1f6f2b6c11")  # ids are derive
 class Backend:
     name = "sops"
     requires = ("cryptography",)
+    detection = "a JSON or YAML file with a `sops` block"
+
+    @staticmethod
+    def capabilities() -> frozenset[str]:
+        return SopsVault.capabilities
+
+    @staticmethod
+    def detects(path) -> bool:
+        """A sops file (JSON or YAML) carries a `sops` block with its metadata."""
+        try:
+            text = Path(path).read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            return False
+        json_like = text.lstrip().startswith("{") and '"sops"' in text
+        yaml_like = any(line.startswith("sops:") for line in text.splitlines())
+        return json_like or yaml_like
 
     @classmethod
     def missing_dependencies(cls) -> list[str]:

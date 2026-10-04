@@ -22,7 +22,7 @@ Username = Annotated[Optional[str], typer.Option("--username", help="Pick among 
 
 def _kp(ctx: typer.Context):
     st = c.state(ctx)
-    return c.open_db(c.require_db(st), st.key)
+    return c.open_kdbx(st, c.require_db(st))
 
 
 def _refused(exc: Exception) -> None:
@@ -32,7 +32,7 @@ def _refused(exc: Exception) -> None:
 def _vault(ctx: typer.Context):
     st = c.state(ctx)
     db = c.require_db(st)
-    return db, (lambda: c.open_db(db, st.key))
+    return db, (lambda: c.open_kdbx(st, db))
 
 
 def _other(path: Path, password_env: str, keyfile: Optional[Path], fallback=None):

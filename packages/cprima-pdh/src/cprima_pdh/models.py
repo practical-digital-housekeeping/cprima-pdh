@@ -404,6 +404,8 @@ class BackendRow(Frozen):
     name: str
     ready: bool  # its dependencies are installed
     detail: str
+    detection: str = ""  # how a file of this kind is recognised
+    capabilities: list[str] = []  # what its vault can do
 
 
 class BackendList(Frozen):

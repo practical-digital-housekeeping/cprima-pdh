@@ -26,7 +26,7 @@ Username = Annotated[Optional[str], typer.Option("--username", help="Pick among 
 def _vault(ctx: typer.Context):
     st = c.state(ctx)
     db = c.require_db(st)
-    return db, (lambda: c.open_db(db, st.key))
+    return db, (lambda: c.open_kdbx(st, db))
 
 
 def _refused(exc: Exception) -> None:

@@ -29,7 +29,7 @@ class StatusName(str, Enum):
 
 def _run_conform(ctx: typer.Context, fmt: Format, status: StatusName, only_schema: str | None, level: c.LevelName) -> None:
     st = c.state(ctx)
-    kp = c.open_vault(c.require_db(st), st.key)
+    kp = c.open_vault(st, c.require_db(st), st.key)
     c.emit(conform_mod.conformance(kp, c.load_taxonomy(st), status.value, only_schema, level.value), fmt)
 
 
@@ -57,7 +57,7 @@ Online = Annotated[bool, typer.Option("--online", help="Allow network access; wi
 
 def _kp(ctx: typer.Context):
     st = c.state(ctx)
-    return c.open_vault(c.require_db(st), st.key)
+    return c.open_vault(st, c.require_db(st), st.key)
 
 
 @app.command("known-passwords")
@@ -127,7 +127,7 @@ def validate(
     """Every finding with its level (ERROR, WARN, INFO), like log levels; exit 1 only if a finding reaches
     --fail-on (default ERROR)."""
     st = c.state(ctx)
-    report = schema.validate(c.open_vault(c.require_db(st), st.key), c.load_taxonomy(st))
+    report = schema.validate(c.open_vault(st, c.require_db(st), st.key), c.load_taxonomy(st))
     shown = schema.filter_level(report, level.value)
     c.emit(schema.summarize(shown) if summary else shown, fmt)
     worst = schema.worst_level(report)  # the exit code ignores the display filter

@@ -21,7 +21,7 @@ PasswordEnv = Annotated[str, typer.Option("--password-env", help="Environment va
 def _vault(ctx: typer.Context):
     st = c.state(ctx)
     db = c.require_db(st)
-    return db, (lambda: c.open_db(db, st.key))
+    return db, (lambda: c.open_kdbx(st, db))
 
 
 def _refused(exc: Exception) -> None:

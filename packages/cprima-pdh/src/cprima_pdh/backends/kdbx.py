@@ -63,9 +63,28 @@ KIND_STORAGE = {
 }
 
 
+_KDBX_SIGNATURE = bytes.fromhex("03d9a29a67fb4bb5")  # the two signature words every KDBX file starts with
+
+
 class Backend:
     name = "kdbx"
     requires = ("pykeepass",)
+    detection = "the file starts with the KDBX signature"
+
+    @staticmethod
+    def capabilities() -> frozenset[str]:
+        from .kdbx_vault import KdbxVault
+
+        return KdbxVault.capabilities
+
+    @staticmethod
+    def detects(path) -> bool:
+        """A KDBX file starts with the KDBX signature."""
+        try:
+            with open(path, "rb") as f:
+                return f.read(8) == _KDBX_SIGNATURE
+        except OSError:
+            return False
 
     @classmethod
     def missing_dependencies(cls) -> list[str]:

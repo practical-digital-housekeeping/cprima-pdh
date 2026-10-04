@@ -89,7 +89,14 @@ def _(data: DoctorReport, ascii_only: bool = False) -> str:
 
 @to_text.register
 def _(data: BackendList, ascii_only: bool = False) -> str:
-    return "".join(f"{b.name:10} {b.detail}\n" for b in data.backends)
+    out = []
+    for b in data.backends:
+        out.append(f"{b.name:10} {b.detail}\n")
+        if b.detection:
+            out.append(f"{'':10} recognised by: {b.detection}\n")
+        if b.capabilities:
+            out.append(f"{'':10} can: {', '.join(b.capabilities)}\n")
+    return "".join(out)
 
 
 @to_text.register
