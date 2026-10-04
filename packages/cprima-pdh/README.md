@@ -123,6 +123,26 @@ macros, links to other workbooks, binary (`.xls`, `.xlsb`) or OpenDocument form 
 spreadsheet to keep leading zeros or long numbers. `pdh io export-csv` writes the review file: no secret column, and cells a
 spreadsheet would run as a formula are written as text.
 
+## Using pdh from Python
+
+For scripts and test automation, `cprima_pdh.api` opens a vault in memory: no file, no argument, no command line. It is a hobby
+project at version 0.x, so this surface can change.
+
+```python
+from cprima_pdh.api import open_vault
+
+with open_vault("accounts.kdbx", write=True) as v:      # passphrase from KDBX_PASSWORD; read-only without write=True
+    v.add_accounts([{"Title": "user001", "UserName": "user001@test.example.org", "Tags": "qa"}], group="Test accounts")
+    v.fill("Test accounts")                              # generate and store the missing passwords; returns no secret
+    for account in v.accounts(tag="qa"):
+        password = v.secret(account).get_secret_value()  # a SecretStr until you ask for the text
+        register(account.username, password)             # your automation
+        v.set_secrets({account.path: {"otp": seed_shown_by_the_site}})   # one verified write for many accounts
+    code = v.otp_code("Test accounts/user001").code      # the current one-time code, not the seed
+```
+
+Secrets come back as `SecretStr`; the module docstring of `cprima_pdh/api.py` says what the library guards and what it cannot.
+
 ## Safety
 
 Read-only by default; every write is a dry run unless `--apply`, and is verified by reopening the saved file. pdh

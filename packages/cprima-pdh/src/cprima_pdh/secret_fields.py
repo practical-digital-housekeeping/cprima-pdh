@@ -115,9 +115,11 @@ def fill_targets(source, path: str, sset: SchemaSet, username: str | None = None
 
 
 def fill_entries(open_db: Callable[[], object], db: Path, values: Mapping[str, Mapping[str, str]], apply: bool,
-                 sset: SchemaSet) -> OrgChange:
+                 sset: SchemaSet, any_secret: bool = False) -> OrgChange:
     """Set secret fields of several entries in one write, one history snapshot per entry. `values` maps an entry's id to its
-    field values. Every name must be a secret field of that entry and no value may be empty. The report names fields only."""
+    field values. Every name must be a secret field of that entry (with `any_secret`: or any field that is a secret under the
+    data boundary, such as a one-time-password seed the entry's record type does not list) and no value may be empty. The
+    report names fields only."""
 
     def build(vault: Vault) -> Plan:
         entries = {e.id: e for e in vault.entries()}
@@ -127,7 +129,7 @@ def fill_entries(open_db: Callable[[], object], db: Path, values: Mapping[str, M
                 raise WriteError("an entry to fill is no longer in the vault")
             allowed = {f.name for f in secret_fields(e, sset)}
             for name, value in fields.items():
-                if name not in allowed:
+                if name not in allowed and not (any_secret and _is_secret(name, [], sset)):
                     raise WriteError(f"{name} is not a secret field of {e.path!r}")
                 if not value:
                     raise WriteError(f"{name}: an empty value is not a secret")

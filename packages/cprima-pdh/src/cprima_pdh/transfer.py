@@ -107,19 +107,27 @@ def import_xlsx(open_db: Callable[[], object], db: Path, file: Path, group: str,
 
 def _import_table(open_db: Callable[[], object], db: Path, file: Path, group: str, apply: bool, sset: SchemaSet | None,
                   read: Callable[[Path], spreadsheet.Table]) -> ImportReport:
-    """Add the rows of a table as entries below `group` (created if missing); unknown columns become custom fields. A column
-    that names a secret refuses the whole file (see `boundary`): secrets are never read from a file. The report says how many
-    secret fields of the new entries are still empty (see `secret_fields`). `read` turns the file into the table."""
+    """Import a file read by `read` as a table (see `import_table`)."""
     try:
         table = read(file)
     except spreadsheet.SpreadsheetError as exc:
         raise WriteError(str(exc)) from exc
+    return import_table(open_db, db, table, str(file), group, apply, sset)
+
+
+def import_table(open_db: Callable[[], object], db: Path, table: spreadsheet.Table, source: str, group: str, apply: bool,
+                 sset: SchemaSet | None = None) -> ImportReport:
+    """Add the rows of a table as entries below `group` (created if missing); unknown columns become custom fields. A column
+    that names a secret refuses the whole table (see `boundary`): secrets are never read from a file or handed in as data. The
+    report says how many secret fields of the new entries are still empty (see `secret_fields`). `source` names where the
+    table came from, for the report and the messages."""
+    name = Path(source).name
     header, raw_rows = table.header, table.rows
     if secret := boundary.secret_columns(header, sset):
-        raise WriteError(boundary.refusal(secret, Path(file).name))
+        raise WriteError(boundary.refusal(secret, name))
     kinds = {h: _COLUMNS.get(h.strip().lower()) for h in header}
     if "title" not in kinds.values():
-        raise WriteError(f"{Path(file).name} needs a Title column")
+        raise WriteError(f"{name} needs a Title column")
     custom_columns = [h for h, kind in kinds.items() if kind is None and h]
     rows: list[dict] = []
     for number, raw in enumerate(raw_rows, start=2):  # row 1 is the header
@@ -143,7 +151,7 @@ def _import_table(open_db: Callable[[], object], db: Path, file: Path, group: st
     for row in rows:
         key = (row["path"], row["title"])
         if key in seen:
-            raise WriteError(f"{Path(file).name} has the title {row['title']!r} twice in {'/'.join(row['path']) or '/'}")
+            raise WriteError(f"{name} has the title {row['title']!r} twice in {'/'.join(row['path']) or '/'}")
         seen.add(key)
 
     def build(vault: Vault) -> Plan:
@@ -151,7 +159,7 @@ def _import_table(open_db: Callable[[], object], db: Path, file: Path, group: st
             existing = _find_group(vault, list(row["path"]))
             if existing is not None and any(e.title == row["title"] for e in _entries_in(vault, existing.id)):
                 raise WriteError(f"{'/'.join(row['path']) or '/'!r} already has an entry {row['title']!r}")
-        report = ImportReport(kind=table.kind, source=str(file), entries=len(rows),
+        report = ImportReport(kind=table.kind, source=source, entries=len(rows),
                               groups=_new_paths(vault, {r["path"] for r in rows}), columns=custom_columns,
                               secrets_to_fill=sum(_to_fill(r, sset) for r in rows))
         if not rows:
