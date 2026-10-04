@@ -161,7 +161,7 @@ def test_kdbx_info_has_the_format_cipher_and_key_derivation(messy):
     assert info.format == "KDBX 4.0" and info.cipher == "aes256" and info.kdf == "argon2d"
 
 
-@pytest.mark.slow
+@pytest.mark.compatibility
 @pytest.mark.parametrize("name", ["template-kdbx3", "template-kdbx4", "template-kdbx41", "template-kdbx4-argon2id",
                                   "template-kdbx4-aeskdf", "template-kdbx4-chacha20", "template-kdbx4-twofish"])
 def test_every_genuine_template_is_an_empty_vault_with_a_root(name):

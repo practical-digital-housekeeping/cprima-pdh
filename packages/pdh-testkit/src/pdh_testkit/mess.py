@@ -14,9 +14,9 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from lxml import etree
-from pykeepass import PyKeePass, create_database
 
-from .vault import DEFAULT_PASSWORD, _lower_kdf
+
+from .vault import DEFAULT_PASSWORD, fresh_database
 
 FEATURES = ("history", "attachments", "tags", "icons", "colours", "override-url", "autotype", "expiry",
             "previous-parent", "recycle-bin", "group-notes", "duplicate-titles", "protection-flags", "references",
@@ -33,8 +33,7 @@ class Messy:
 def messy_vault(path: Path, recycle_bin: bool = True) -> Messy:
     """Write the messy vault to `path` (KDBX 4.0) and describe it."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    kp = create_database(str(path), password=DEFAULT_PASSWORD)
-    _lower_kdf(kp)
+    kp = fresh_database(path, DEFAULT_PASSWORD)
     now = datetime.now(timezone.utc)
     root = kp.root_group
     money = kp.add_group(root, "Money")

@@ -1,0 +1,29 @@
+name: Compatibility
+
+# The same behaviour on every genuine KeePassXC template (KDBX 3.1, 4.0, 4.1; AES-256, ChaCha20, Twofish; Argon2d, Argon2id,
+# AES-KDF). Slow: one open of the AES-KDF template alone takes minutes. Runs by hand, and when code that touches the file
+# formats, the save path or key derivation changes. Interoperability needs keepassxc-cli and is run locally (`just test-interoperability`).
+
+on:
+  workflow_dispatch: {}
+  push:
+    branches: [main]
+    paths:
+      - "packages/cprima-pdh/src/cprima_pdh/backends/kdbx_vault.py"
+      - "packages/cprima-pdh/src/cprima_pdh/backends/kdbx.py"
+      - "packages/cprima-pdh/src/cprima_pdh/txn.py"
+      - "packages/cprima-pdh/src/cprima_pdh/source.py"
+      - "packages/cprima-pdh/src/cprima_pdh/database.py"
+      - "packages/cprima-pdh/src/cprima_pdh/sopsfmt.py"
+      - "packages/pdh-testkit/vaults/**"
+
+jobs:
+  compatibility:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+      - name: Run the compatibility set
+        run: uv run --all-packages --all-extras pytest -q -n auto -m compatibility

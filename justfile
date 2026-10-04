@@ -7,17 +7,25 @@ set quiet
 default:
     just --list
 
-# run all tests
+# the fast set (the default): seconds to a few minutes
 test:
     uv run --all-packages --all-extras pytest -q
 
-# vaults written by pdh, read back by KeePassXC itself (keepassxc-cli as a read-only checker; skipped if not installed)
-test-client:
-    uv run --all-packages --all-extras pytest -q -m client
+# the fast set on all cores
+test-par:
+    uv run --all-packages --all-extras pytest -q -n auto
 
-# the write commands on the genuine KDBX 3.1 / 4.0 templates (real key derivation: about 15 minutes)
-test-genuine:
-    uv run --all-packages --all-extras pytest -q -m slow
+# interoperability: independent programs (keepassxc-cli, sops, age) read what pdh wrote; each skips when its program is missing
+test-interoperability:
+    uv run --all-packages --all-extras pytest -q -n auto -m "interoperability and not compatibility"
+
+# compatibility: the same behaviour on every genuine template (all KDBX versions, ciphers, key derivations); about an hour
+test-compatibility:
+    uv run --all-packages --all-extras pytest -q -n auto -m compatibility
+
+# both expensive sets, on all cores, before a release or after touching the file formats
+test-release:
+    uv run --all-packages --all-extras pytest -q -n auto -m "compatibility or interoperability"
 
 # build the cprima-pdh sdist and wheel into packages/cprima-pdh/dist
 build:

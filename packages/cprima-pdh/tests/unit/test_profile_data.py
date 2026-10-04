@@ -18,7 +18,7 @@ from cprima_pdh.schema import SchemaError, parse_schemas, validate
 
 SSET = profiles.load(profiles.DEFAULT)
 RAW = tomllib.loads(TAXONOMY.read_text(encoding="utf-8"))
-SRC = Path(__file__).resolve().parents[1] / "src" / "cprima_pdh"
+SRC = Path(__file__).resolve().parents[2] / "src" / "cprima_pdh"
 
 # --- finding levels are data -------------------------------------------------------------------------
 

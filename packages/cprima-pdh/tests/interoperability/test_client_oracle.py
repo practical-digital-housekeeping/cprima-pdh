@@ -1,4 +1,4 @@
-"""Does a real client's engine read what pdh writes? KeePassXC's own `keepassxc-cli` is the checker (`just test-client`).
+"""Does a real client's engine read what pdh writes? KeePassXC's own `keepassxc-cli` is the checker (`just test-interoperability`).
 
 Test-only and read-only: pdh writes a vault, KeePassXC opens it and reports what it sees. Nothing of KeePassXC is part of
 the product, and the tests are skipped when it is not installed. Passwords are throwaway and every entry is invented.
@@ -10,6 +10,7 @@ from pathlib import Path
 
 import pytest
 from pdh_testkit import DEFAULT_PASSWORD, vaults
+from pdh_testkit.cheap import cheap_copy
 from pdh_testkit.mess import messy_vault
 from typer.testing import CliRunner
 
@@ -18,7 +19,7 @@ from cprima_pdh.cli import _common, app
 from cprima_pdh.source import pykeepass_open
 
 KPX = shutil.which("keepassxc-cli") or r"C:\Program Files\KeePassXC\keepassxc-cli.exe"
-pytestmark = [pytest.mark.client,
+pytestmark = [pytest.mark.interoperability,
               pytest.mark.skipif(not Path(KPX).exists(), reason="KeePassXC (keepassxc-cli) is not installed")]
 SECRET = "JBSWY3DPEHPK3PXP"
 
@@ -151,13 +152,13 @@ def test_an_imported_vault_and_a_merge_are_read_back(vault, tmp_path):
     assert "Notes: edited in the copy" in vault.show("Other/Soon")
 
 
-@pytest.mark.slow
+@pytest.mark.compatibility
 @pytest.mark.parametrize("template", [v.name for v in vaults.all_vaults() if v.name.startswith("template-")])
 def test_the_genuine_templates_edited_by_pdh_still_open_in_the_client(template, tmp_path, monkeypatch):
     """KDBX 3.1 and 4.0 written by KeePassXC itself, edited by pdh, read by KeePassXC again."""
     t = vaults.load(template)
     db = tmp_path / "work.kdbx"
-    shutil.copyfile(t.path, db)
+    cheap_copy(template, db)  # the genuine template; its slow key derivation is lowered (see pdh_testkit.cheap)
     monkeypatch.setattr(_common, "open_db", lambda path, _key: pykeepass_open(path, t.password, None))
 
     def pdh(*args, env=None):

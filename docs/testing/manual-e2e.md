@@ -3,7 +3,7 @@
 Licensed under CC-BY-4.0.
 
 The automated tests run pdh against synthetic vaults and against copies of two genuine, hand-made templates
-(`just test-genuine`: KDBX 3.1 and 4.0 written by KeePassXC). What they cannot show is how a **real client** presents
+(`just test-compatibility`: KDBX 3.1 and 4.0 written by KeePassXC). What they cannot show is how a **real client** presents
 what pdh wrote. That is a human check, done once per release and after any change to a write command.
 
 Never use your real vault for this. Work on a copy of a template (`packages/pdh-testkit/vaults/template-kdbx4.kdbx`,

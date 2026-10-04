@@ -5,7 +5,7 @@ Everything else talks to the Vault interface. Whatever a store's library cannot 
 import re
 from pathlib import Path
 
-SRC = Path(__file__).resolve().parents[1] / "src" / "cprima_pdh"
+SRC = Path(__file__).resolve().parents[2] / "src" / "cprima_pdh"
 BACKEND = {"kdbx.py", "kdbx_vault.py"}
 # (pattern, what it would mean)
 FORBIDDEN = [

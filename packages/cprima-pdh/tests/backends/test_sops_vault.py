@@ -184,9 +184,9 @@ def test_only_x25519_identities_are_accepted():
         age.identities_from_text("# nothing here\n")
 
 
-# --- the real tools as a checker (opt in: just test-client) --------------------------------------------------------------
+# --- the real tools as a checker (opt in: just test-interoperability) --------------------------------------------------------------
 
-@pytest.mark.client
+@pytest.mark.interoperability
 def test_real_sops_and_age_produce_files_we_read_identically(tmp_path):
     sops, keygen = shutil.which("sops"), shutil.which("age-keygen")
     if not (sops and keygen):
@@ -206,7 +206,7 @@ def test_real_sops_and_age_produce_files_we_read_identically(tmp_path):
     assert sorted(by_path(ours)) == sorted(by_path(SopsVault.open(FIX.path, IDS)))
 
 
-@pytest.mark.client
+@pytest.mark.interoperability
 def test_real_sops_refuses_the_files_we_refuse(tmp_path):
     sops = shutil.which("sops")
     if not sops:

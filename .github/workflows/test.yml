@@ -1,0 +1,19 @@
+name: Test
+
+# The default set (see packages/cprima-pdh/tests/TESTING.md): unit, engine, backend, command and CLI tests, about a minute on four cores.
+# Compatibility (every genuine template) and interoperability (real keepassxc-cli, sops, age) are not part of it.
+
+on:
+  push:
+    branches: [main]
+  pull_request: {}
+
+jobs:
+  default-set:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+      - name: Run the default set
+        run: uv run --all-packages --all-extras pytest -q -n auto

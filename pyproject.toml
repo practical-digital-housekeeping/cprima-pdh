@@ -4,15 +4,15 @@
 members = ["packages/*"]
 
 [dependency-groups]
-dev = ["pytest>=8", "pdh-testkit"]
+dev = ["pytest>=8", "pytest-xdist>=3", "pdh-testkit"]
 
 [tool.uv.sources]
 pdh-testkit = { workspace = true }
 
 [tool.pytest.ini_options]
 testpaths = ["packages/cprima-pdh/tests", "packages/pdh-testkit/tests"]
-addopts = "-m 'not slow and not client'"
+addopts = "-m 'not compatibility and not interoperability' --strict-markers --durations=10"
 markers = [
-    "slow: opens genuine vaults with their real key derivation (minutes); run with `just test-genuine`",
-    "client: asks a real client (keepassxc-cli) to read what pdh wrote; run with `just test-client`",
+    "compatibility: the same behaviour across every genuine template (all KDBX versions, ciphers, key derivations; about an hour); run with `just test-compatibility`",
+    "interoperability: an independent program (keepassxc-cli, sops, age) reads or checks what pdh wrote; run with `just test-interoperability`",
 ]

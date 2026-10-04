@@ -6,17 +6,17 @@ is picked up automatically.
 """
 import csv
 import json
-import shutil
 
 import pytest
 from pdh_testkit import vaults
+from pdh_testkit.cheap import cheap_copy
 from pdh_testkit.mess import messy_vault
 from typer.testing import CliRunner
 
 from cprima_pdh.cli import _common, app
 from cprima_pdh.source import pykeepass_open
 
-pytestmark = pytest.mark.slow  # real Argon2 on every open: minutes, so `just test-genuine`, not the default run
+pytestmark = pytest.mark.compatibility  # real key derivation on every open: minutes, so `just test-compatibility`, not the default run
 
 TEMPLATES = [v.name for v in vaults.all_vaults() if v.name.startswith("template-")]
 
@@ -25,7 +25,7 @@ TEMPLATES = [v.name for v in vaults.all_vaults() if v.name.startswith("template-
 def ctx(request, tmp_path, monkeypatch):
     template = vaults.load(request.param)
     db = tmp_path / "work.kdbx"
-    shutil.copyfile(template.path, db)
+    cheap_copy(request.param, db)  # the genuine template; its slow key derivation is lowered (see pdh_testkit.cheap)
     state = {"password": template.password}
     monkeypatch.setattr(_common, "open_db", lambda path, _key: pykeepass_open(path, state["password"], None))
 
@@ -166,8 +166,8 @@ def test_settings_key_derivation_and_password(ctx):
     assert ctx.js("db", "settings", "--name", "Work", "--history-max-items", "7", "--apply")["applied"] is True
     shown = ctx.js("db", "settings")
     assert (shown["name"], shown["history_max_items"]) == ("Work", 7)
-    if ctx.format.startswith("KDBX 3"):
-        ctx.run("db", "kdf", "--iterations", "2", "--apply", expect=2)  # AES-KDF has no Argon2 parameters: refused cleanly
+    if ctx.js("db", "kdf")["iterations"] is None:  # AES-KDF (KDBX 3.x, or a KDBX 4 vault that uses it) has no Argon2 parameters
+        ctx.run("db", "kdf", "--iterations", "2", "--apply", expect=2)  # refused cleanly
         assert ctx.js("db", "kdf")["iterations"] is None
     else:
         assert ctx.js("db", "kdf", "--iterations", "3", "--memory", "8192", "--apply")["iterations"] == 3

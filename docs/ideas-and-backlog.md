@@ -60,7 +60,7 @@ the database (create, password, key file, settings, key derivation, empty bin), 
 export), `generate`, `inspect otp`, and the online checks `check known-passwords` / `check breaches`.
 Not offered: KDBX 3 to 4 conversion (pykeepass cannot), auto-type and browser integration, the graphical UI.
 Since then: every write goes through `txn.execute` (a test enforces it; bulk edits snapshot each touched entry);
-the write commands run on the genuine KDBX 3.1 and 4.0 templates (`just test-genuine`, about 15 minutes); breach and
+the write commands run on the genuine KDBX 3.1 and 4.0 templates (`just test-compatibility`, about an hour: run it when preparing a release); breach and
 leaked-password findings take level and advice from the profile; `inspect inventory` reports history and attachment
 totals; `delete` records `PreviousParentGroup` in KDBX 4.1 vaults. Open: a hand-made KDBX 4.1 template and the manual
 checks in `docs/testing/manual-e2e.md` (only a human with KeePassXC and KeePassDX can do them).

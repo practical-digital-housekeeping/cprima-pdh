@@ -15,7 +15,7 @@ from typer.testing import CliRunner
 from cprima_pdh import session
 from cprima_pdh.cli import app
 
-CLI_DIR = Path(__file__).resolve().parents[1] / "src" / "cprima_pdh" / "cli"
+CLI_DIR = Path(__file__).resolve().parents[2] / "src" / "cprima_pdh" / "cli"
 ALLOWED_ECHO = {("_common.py", "fail"), ("__init__.py", "_version")}  # an error message; the --version flag
 
 

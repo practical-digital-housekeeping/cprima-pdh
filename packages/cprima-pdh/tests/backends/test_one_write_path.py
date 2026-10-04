@@ -1,7 +1,7 @@
 """There is one write path: no module but `txn` saves a vault, apart from the two that create a new file."""
 from pathlib import Path
 
-SRC = Path(__file__).resolve().parents[1] / "src" / "cprima_pdh"
+SRC = Path(__file__).resolve().parents[2] / "src" / "cprima_pdh"
 MAY_SAVE = {"source.py": "save_vault, the one place that saves (and keeps a KDBX 3 header hash valid)",
             "export.py": "export_kdbx writes a copy to a new, exclusively created file; the vault itself is untouched",
             "kdbx_vault.py": "KdbxVault.create makes a new vault file",

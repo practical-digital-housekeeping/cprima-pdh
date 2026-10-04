@@ -1,6 +1,8 @@
 """Synthetic vaults: written by pykeepass with the key derivation lowered. Unit and integration tests only."""
 from __future__ import annotations
 
+import shutil
+import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -45,12 +47,31 @@ def _lower_kdf(kp: PyKeePass) -> None:
             params[key].value = value
 
 
+_PROTOTYPES: dict[str, bytes] = {}
+
+
+def fresh_database(path: Path, password: str = DEFAULT_PASSWORD) -> PyKeePass:
+    """An empty KDBX 4 vault at `path`, opened, with the cheap key derivation.
+
+    `create_database` pays the client-default Argon2 cost (over a second) once at creation, so it is done once per process
+    and password; every later vault is a copy of that file, which opens in milliseconds."""
+    if password not in _PROTOTYPES:
+        scratch = Path(tempfile.mkdtemp(prefix="pdh-prototype-")) / "p.kdbx"
+        kp = create_database(str(scratch), password=password)
+        _lower_kdf(kp)
+        kp.save()
+        _PROTOTYPES[password] = scratch.read_bytes()
+        shutil.rmtree(scratch.parent, ignore_errors=True)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(_PROTOTYPES[password])
+    return PyKeePass(str(path), password=password)
+
+
 def synthetic_vault(path: Path, entries: list[Entry] | tuple[Entry, ...] = (), password: str = DEFAULT_PASSWORD,
                     groups: list[str] | tuple[str, ...] = ()) -> Path:
     """Write a KDBX 4 vault with `entries` (and extra empty `groups`) to `path`; returns `path`."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    kp = create_database(str(path), password=password)
-    _lower_kdf(kp)
+    kp = fresh_database(path, password)
     for g in groups:
         _group(kp, g)
     for e in entries:
