@@ -28,6 +28,20 @@ class Unsupported(Exception):
     """The backend does not offer a capability the command needs."""
 
 
+class WriteError(Exception):
+    """A write was refused or failed verification; the vault is as it was."""
+
+
+def find_data(vault, path: str, username: str | None = None):
+    """The snapshot of the single entry at `group/path/title` (narrowed by user name) in a vault."""
+    try:
+        return vault.find_entry(path, username)
+    except KeyError as exc:
+        raise WriteError(exc.args[0]) from None
+    except LookupError as exc:
+        raise WriteError(str(exc).replace("a user name", "--username")) from None
+
+
 @dataclass(frozen=True)
 class Field:
     """A custom field's value and whether the store keeps it protected."""
@@ -175,13 +189,24 @@ def resolve_entry(entries: list[EntryData], path: str, username: str | None = No
     return hits[0]
 
 
+_ADAPTERS: list = []
+
+
+def register_adapter(adapt) -> None:
+    """A backend that can wrap a store's own object (`adapt(obj)` returns a Vault, or None when `obj` is not its kind)
+    registers here when its module is imported, so this module imports no backend."""
+    if adapt not in _ADAPTERS:
+        _ADAPTERS.append(adapt)
+
+
 def as_vault(obj) -> Vault:
-    """A Vault for `obj`: a Vault is returned as is, an opened pykeepass database is wrapped. (A migration aid; goes when
-    nothing hands a raw pykeepass object around any more.)"""
+    """A Vault for `obj`: a Vault is returned as is, an object that knows its Vault view gives it, anything else is offered to
+    the registered adapters. (A migration aid; goes when nothing hands a store's own object around any more.)"""
     if hasattr(obj, "capabilities") and callable(getattr(obj, "entries", None)):
         return obj
     if hasattr(obj, "__vault__"):  # a fake or adapter that knows its own Vault view
         return obj.__vault__()
-    from .backends.kdbx import KdbxVault
-
-    return KdbxVault(obj)
+    for adapt in _ADAPTERS:
+        if (vault := adapt(obj)) is not None:
+            return vault
+    raise TypeError(f"{type(obj).__name__} is not a Vault and no backend adapts it")

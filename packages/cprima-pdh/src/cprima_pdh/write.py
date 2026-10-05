@@ -1,7 +1,6 @@
 """Write operations. Everything here is dry-run unless `apply` is set."""
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import Callable
 
@@ -9,23 +8,10 @@ from .backends.kdbx import STANDARD_ATTR, STANDARD_PROTECTED
 from . import boundary
 from .models import Change
 from .schema import make_ref, uuid_key
-from .vault import Vault, as_vault
+from .transaction import _fingerprint, _lock_files  # noqa: F401  (re-exported: `doctor` imports `_lock_files` from here)
+from .vault import Vault, WriteError, as_vault, find_data  # noqa: F401  (re-exported: most of the engine imports them from here)
 
 _HIDDEN = "(hidden)"
-
-
-class WriteError(Exception):
-    pass
-
-
-def find_data(vault, path: str, username: str | None = None):
-    """The snapshot of the single entry at `group/path/title` (narrowed by user name) in a vault."""
-    try:
-        return vault.find_entry(path, username)
-    except KeyError as exc:
-        raise WriteError(exc.args[0]) from None
-    except LookupError as exc:
-        raise WriteError(str(exc).replace("a user name", "--username")) from None
 
 
 def protection_of(e, field: str, protect: bool, unprotect: bool = False) -> bool:
@@ -76,15 +62,6 @@ def plan_set(
     else:
         action = "set"
     return Change(entry=path, field=field, old=shown(old), new=shown(value), action=action)
-
-
-def _fingerprint(db: Path) -> tuple[int, int]:
-    st = os.stat(db)
-    return st.st_mtime_ns, st.st_size
-
-
-def _lock_files(db: Path) -> list[Path]:
-    return [p for p in (db.with_name(db.name + ".lock"), db.with_name("." + db.name + ".lock")) if p.exists()]
 
 
 def apply_set(

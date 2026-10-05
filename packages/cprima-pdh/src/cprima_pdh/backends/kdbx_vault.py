@@ -22,7 +22,7 @@ import uuid as uuidlib
 from datetime import datetime, timezone
 from pathlib import Path
 
-from ..vault import STANDARD, EntryData, Field, GroupData, VaultBase, VaultInfo, resolve_entry
+from ..vault import STANDARD, EntryData, Field, GroupData, VaultBase, VaultInfo, register_adapter, resolve_entry
 from .kdbx import STANDARD_ATTR, kdf_name
 
 # KDBX versions whose writing has been verified against genuine KeePassXC files (3.1, 4.0 and 4.1 templates); anything else
@@ -582,3 +582,8 @@ class KdbxVault(VaultBase):
         if not stored_header_hash_ok(self.kp, target):
             return ["the file header does not match its stored hash: clients would refuse the file"]
         return []
+
+
+# Anything that is not a Vault and offers nothing else is taken to be an opened pykeepass database (what the engine was
+# handed before there was a Vault); the registration makes `vault.as_vault` work without importing this module.
+register_adapter(KdbxVault)
