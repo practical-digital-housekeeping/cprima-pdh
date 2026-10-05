@@ -89,8 +89,11 @@ Times
   number that points at the content kept in the file's inner header. **Format (KDBX 3.x):** the content is in `Meta/Binaries`.
 - **History**: copies of the entry as it was before each edit, oldest first. **Seen:** `History` holds `Entry` children.
 - **AutoType**: the keystroke settings for typing a login into a window; `Association` pairs a window title with a sequence.
-- **DeletedObjects**: **format:** one `DeletedObject` per entry or group removed for good, with its `UUID` and the
-  `DeletionTime`. **Seen:** the element exists in every file looked at, empty in all of them.
+- **DeletedObjects**: one `DeletedObject` per entry or group removed for good, with its `UUID` and the `DeletionTime`.
+  **Seen:** the element exists in every KeePassXC-made file looked at, empty in them; KeePassXC's own writer
+  (`KdbxXmlWriter.cpp`) and reader (`KdbxXmlReader.cpp`) show both parts, and the reader refuses a record without one. A purge
+  or an emptied recycle bin by pdh writes these records (a group's entries, its subgroups, then the group; never the top group
+  or the bin itself), and `keepassxc-cli export` lists them. Moving to the bin writes none.
 
 ## How values are written
 

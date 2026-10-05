@@ -43,7 +43,7 @@ class MemoryVault(VaultBase):
         self._content: dict[str, dict[str, bytes]] = {}  # attachment content by entry id
         self._history: dict[str, list[EntryData]] = {}  # earlier states by entry id, oldest first
         self._origin: dict[str, str] = {}  # where a trashed entry or group came from
-        self._deleted: set[str] = set()  # ids of what was removed for good (tombstones)
+        self._deleted: dict[str, datetime] = {}  # what was removed for good (tombstones): id and the time it was removed
         self._bin_on = True
 
     def _derive_groups(self) -> list[GroupData]:
@@ -83,6 +83,16 @@ class MemoryVault(VaultBase):
 
     def deleted_ids(self) -> set[str]:
         return set(self._deleted)
+
+    def deletions(self) -> dict[str, datetime]:
+        return dict(self._deleted)
+
+    def record_deleted(self, items) -> None:
+        """Record these ids as deleted for good at these times; an id already recorded keeps the earlier time."""
+        for uid, when in items.items():
+            when = when.astimezone(timezone.utc).replace(microsecond=0)
+            if uid not in self._deleted or when < self._deleted[uid]:
+                self._deleted[uid] = when
 
     def bin_enabled(self) -> bool:
         return self._bin_on
@@ -206,7 +216,30 @@ class MemoryVault(VaultBase):
         self._entries = [e for e in self._entries if e.id != eid]
         for table in (self._content, self._history, self._origin):
             table.pop(eid, None)
-        self._deleted.add(eid)
+        self.record_deleted({eid: _now()})
+
+    def purge_group(self, gid: str) -> None:
+        """Delete a group for good with everything below it; every entry and group that goes is recorded."""
+        group = self._group(gid)
+        if group.is_root or group.is_bin:
+            raise ValueError("the top group and the recycle bin are not deleted; empty the bin instead")
+        gone_groups = self._subtree_group_ids(gid)
+        gone_entries = [e.id for e in self._entries if e.group_id in gone_groups]
+        self.record_deleted({uid: _now() for uid in [*gone_entries, *gone_groups]})
+        self._entries = [e for e in self._entries if e.group_id not in gone_groups]
+        self._groups = [g for g in self._groups if g.id not in gone_groups]
+        for uid in gone_entries:
+            for table in (self._content, self._history, self._origin):
+                table.pop(uid, None)
+
+    def _subtree_group_ids(self, gid: str) -> set[str]:
+        found = {gid}
+        grew = True
+        while grew:
+            more = {g.id for g in self._groups if g.parent_id in found} - found
+            found |= more
+            grew = bool(more)
+        return found
 
     def add_entry(self, gid: str, data: EntryData, content: dict[str, bytes] | None = None, keep_id: bool = False,
                   keep_times: bool = False) -> str:
@@ -294,7 +327,7 @@ class MemoryVault(VaultBase):
         if not bin_ids:
             return
         gone = {g.id for g in self._groups if g.in_bin}
-        self._deleted |= {e.id for e in self._entries if e.in_bin} | gone
+        self.record_deleted({uid: _now() for uid in [*(e.id for e in self._entries if e.in_bin), *gone]})
         self._entries = [e for e in self._entries if not e.in_bin]
         self._groups = [g for g in self._groups if g.id not in gone]
 

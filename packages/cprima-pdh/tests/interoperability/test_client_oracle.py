@@ -198,3 +198,50 @@ def test_the_genuine_templates_edited_by_pdh_still_open_in_the_client(template, 
     assert "Money/a" in listing(db, t.password)
     shown = kpx("show", db, t.password, "Money/a")
     assert "UserName: alex" in shown and "Notes: hi" in shown
+
+
+def recorded_deletions(db, password) -> dict[str, str]:
+    """The `DeletedObject` records KeePassXC itself exports (XML): {entry id as text with hyphens: DeletionTime text}."""
+    import base64
+    import uuid
+    import xml.etree.ElementTree as ET
+
+    root = ET.fromstring(kpx("export", db, password, options=("--format", "xml")))
+    return {str(uuid.UUID(bytes=base64.b64decode(r.findtext("UUID")))): r.findtext("DeletionTime")
+            for r in root.iter("DeletedObject")}
+
+
+def test_a_purge_by_pdh_is_a_record_the_client_reads(vault):
+    from cprima_pdh_kdbxkit.kdbx_vault import KdbxVault
+
+    eid = next(e.id for e in KdbxVault.open(vault.path_, vault.password).entries() if e.title == "Tagged")
+    vault.pdh("edit", "delete", "Money/Tagged", "--apply")
+    assert recorded_deletions(vault.path_, vault.password) == {}  # the bin is a move: no record
+    vault.pdh("edit", "purge", "Recycle Bin/Tagged", "--apply")
+    records = recorded_deletions(vault.path_, vault.password)
+    assert set(records) == {eid} and records[eid]  # the client sees the record, with both parts
+    assert "Recycle Bin/Tagged" not in listing(vault.path_, vault.password)  # and still opens the file
+
+
+@pytest.mark.compatibility
+@pytest.mark.parametrize("template", [v.name for v in vaults.all_vaults() if v.name.startswith("template-")])
+def test_a_purge_by_pdh_is_a_record_the_client_reads_on_every_template(template, tmp_path, monkeypatch):
+    from cprima_pdh_kdbxkit.kdbx_vault import KdbxVault
+
+    t = vaults.load(template)
+    db = tmp_path / "work.kdbx"
+    cheap_copy(template, db)
+    monkeypatch.setattr(_common, "open_db", lambda path, _key: pykeepass_open(path, t.password, None))
+
+    def pdh(*args):
+        result = CliRunner().invoke(app, ["--db", str(db), *args])
+        assert result.exit_code == 0, f"pdh {' '.join(args)}: {result.output}{result.stderr or ''}"
+
+    pdh("edit", "new-group", "/", "Money", "--apply")
+    pdh("edit", "new-entry", "Money", "a", "alex", "--apply")
+    eid = next(e.id for e in KdbxVault.open(db, t.password).entries() if e.title == "a")
+    pdh("edit", "delete", "Money/a", "--apply")
+    pdh("edit", "purge", "Recycle Bin/a", "--apply")
+    records = recorded_deletions(db, t.password)
+    assert eid in records and records[eid]  # KDBX 3.1 (ISO time) and 4.x (base64 time) alike
+    assert "Money/a" not in listing(db, t.password)

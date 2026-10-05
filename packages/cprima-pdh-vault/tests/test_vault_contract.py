@@ -304,14 +304,54 @@ def test_a_purged_entry_is_gone(vault):
     assert all(e.id != eid for e in vault.entries())
 
 
-def test_a_purged_entry_is_recorded_as_deleted(vault, request):
-    """Finding of the contract test: pykeepass records no tombstone (`DeletedObjects`) when it deletes, so a KeePass client that
-    merges the file later may bring the entry back. `deleted_ids` only ever showed what other clients recorded."""
-    if vault.name == "kdbx":
-        request.applymarker(pytest.mark.xfail(strict=True, reason="pykeepass writes no tombstone on delete"))
+def test_a_purged_entry_is_recorded_as_deleted(vault):
+    """A delete needs a record, otherwise a merge cannot tell a deleted entry from one that never arrived. (pykeepass writes
+    none; the KDBX layer does, as a client does.)"""
+    before = datetime.now(timezone.utc).replace(microsecond=0)
     eid = one(vault, "Money/plain").id
     vault.purge_entry(eid)
-    assert eid in vault.deleted_ids()
+    assert eid in vault.deleted_ids() and eid in vault.deletions()
+    assert before <= vault.deletions()[eid] <= datetime.now(timezone.utc)
+
+
+def test_a_purge_records_only_what_was_purged(vault):
+    vault.purge_entry(one(vault, "Money/plain").id)
+    assert len(vault.deletions()) == 1
+
+
+def test_emptying_the_bin_records_every_entry_and_group_below_it_but_not_the_bin(vault):
+    money = group_id(vault, "Money")
+    inner = vault.add_group(money, "Inner")
+    deep = vault.add_entry(inner, replace(one(vault, "Money/plain"), id="", title="deep"))
+    top = one(vault, "Money/plain").id
+    vault.trash_entry(top)
+    vault.trash_group(inner)
+    bin_id = next(g.id for g in vault.groups() if g.is_bin)
+    vault.empty_bin()
+    assert vault.deleted_ids() == {top, deep, inner} and bin_id not in vault.deleted_ids()
+
+
+def test_a_recorded_deletion_keeps_the_earlier_time(vault):
+    eid = one(vault, "Money/plain").id
+    early, late = datetime(2020, 1, 1, tzinfo=timezone.utc), datetime(2021, 1, 1, tzinfo=timezone.utc)
+    vault.record_deleted({"11111111-1111-4111-8111-111111111111": late})
+    vault.record_deleted({"11111111-1111-4111-8111-111111111111": early})
+    vault.record_deleted({"11111111-1111-4111-8111-111111111111": late})
+    assert vault.deletions()["11111111-1111-4111-8111-111111111111"] == early
+    assert eid not in vault.deleted_ids()  # recording a deletion does not remove anything
+
+
+def test_a_purged_group_takes_its_subtree_and_records_it(vault):
+    ids = {e.id for e in vault.entries() if e.group_path in ("Money", "Money/Cards")}
+    groups = {group_id(vault, "Money"), group_id(vault, "Money/Cards")}
+    vault.purge_group(group_id(vault, "Money"))
+    assert vault.deleted_ids() == ids | groups
+    assert all(e.group_path not in ("Money", "Money/Cards") for e in vault.entries())
+
+
+def test_the_top_group_cannot_be_purged(vault):
+    with pytest.raises(ValueError):
+        vault.purge_group(next(g.id for g in vault.groups() if g.is_root))
 
 
 def test_groups_are_added_renamed_moved_and_their_entries_follow(vault):

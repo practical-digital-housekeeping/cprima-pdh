@@ -122,7 +122,8 @@ and is optional.
 6. **Every backend answers the same contract.** A behaviour that is meant for every backend goes into
    `packages/cprima-pdh-vault/tests/test_vault_contract.py`, which runs it on memory and on a real KDBX file (and the read side on a
    sops file); memory is the test backend and is held to the same results as the others. A difference the contract finds is a
-   finding, written down in the test (the tombstone one is there). One a backend lacks must raise `Unsupported`
+   finding, written down in the test (the first one, that pykeepass writes no deletion record, is closed: the KDBX layer writes it, and
+   `test_every_deletion_is_recorded.py` guards that no way of deleting for good skips it). One a backend lacks must raise `Unsupported`
    (`test_unsupported_writes.py`, with sops as the read-only example).
 7. **Writes**: assert what changed *and* what did not (the other entries, the file header, the history count). `execute_vault`
    verifies this on every write; a test of a new command asserts its own expected result as well.

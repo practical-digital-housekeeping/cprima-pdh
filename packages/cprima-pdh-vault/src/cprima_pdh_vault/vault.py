@@ -151,6 +151,7 @@ WRITE_OPERATIONS = frozenset({
     "set_colours", "set_override_url", "set_autotype", "move_entry", "trash_entry", "restore_entry", "origin_group",
     "purge_entry", "add_entry", "overwrite_entry", "attach", "attachment", "detach", "add_group", "rename_group",
     "set_group_notes", "set_group_icon", "move_group", "trash_group", "empty_bin", "bin_enabled", "deleted_ids",
+    "deletions", "record_deleted", "purge_group",
     "settings", "set_settings", "kdf", "set_kdf", "password", "keyfile", "set_password", "set_keyfile", "can_open",
     "stamp", "save", "reopen", "file_problems",
 })

@@ -137,6 +137,48 @@ def test_a_failed_verification_leaves_the_vault_alone(db):
     assert db.read_bytes() == before and not list(db.parent.glob("*.pdh-new*"))
 
 
+# --- a delete leaves a record in `Root/DeletedObjects` -----------------------------------------------------------------------
+
+def test_a_purge_writes_a_record_with_both_its_parts(db):
+    import base64
+    import uuid
+
+    from cprima_pdh_kdbxkit.kdbx_vault import _root
+
+    vault = opened(db)
+    eid = by_title(vault, "b").id
+    vault.purge_entry(eid)
+    vault.save()
+    again = opened(db)
+    records = _root(again.kp).findall("Root/DeletedObjects/DeletedObject")
+    assert len(records) == 1 and [c.tag for c in records[0]] == ["UUID", "DeletionTime"]
+    assert str(uuid.UUID(bytes=base64.b64decode(records[0].findtext("UUID")))) == eid  # base64 of the 16 bytes
+    assert records[0].findtext("DeletionTime") and set(again.deletions()) == {eid} == again.deleted_ids()
+    assert again.deletions()[eid] <= datetime.now(timezone.utc)
+
+
+def test_a_vault_without_the_section_gets_it_when_something_is_deleted(db):
+    from cprima_pdh_kdbxkit.kdbx_vault import _root
+
+    vault = opened(db)
+    section = _root(vault.kp).find("Root/DeletedObjects")
+    if section is not None:
+        section.getparent().remove(section)
+    assert vault.deleted_ids() == set() and vault.deletions() == {}
+    vault.purge_entry(by_title(vault, "a").id)
+    assert len(_root(vault.kp).findall("Root/DeletedObjects/DeletedObject")) == 1
+
+
+def test_a_record_without_a_readable_time_still_counts_as_deleted_but_as_the_earliest(db):
+    from cprima_pdh_kdbxkit.kdbx_vault import _root
+
+    vault = opened(db)
+    eid = by_title(vault, "a").id
+    vault.purge_entry(eid)
+    _root(vault.kp).find("Root/DeletedObjects/DeletedObject/DeletionTime").text = "not a time"
+    assert eid in vault.deleted_ids() and vault.deletions()[eid] == datetime.min.replace(tzinfo=timezone.utc)
+
+
 # --- the file says which program wrote it (`Meta/Generator`) -----------------------------------------------------------------
 
 def test_a_save_writes_the_layers_name_as_the_generator(db):

@@ -19,6 +19,7 @@ import base64
 import hashlib
 import os
 import uuid as uuidlib
+from collections.abc import Mapping
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -91,6 +92,32 @@ def _write_generator(kp) -> None:
         element = etree.Element("Generator")
         meta.insert(0, element)
     element.text = GENERATOR
+
+
+_UNKNOWN_TIME = datetime.min.replace(tzinfo=timezone.utc)  # a record without a readable time: nothing can be shown to be newer
+
+
+def _deleted_section(kp, create: bool):
+    """`Root/DeletedObjects` (the records of what was deleted for good), made under `Root` when asked for and missing."""
+    root = _root(kp).find("Root")
+    if root is None:
+        return None
+    section = root.find("DeletedObjects")
+    if section is None and create:
+        from lxml import etree
+
+        section = etree.SubElement(root, "DeletedObjects")
+    return section
+
+
+def _destroyed_with(group) -> list[str]:
+    """The ids that disappear when `group` is deleted, the way a client records them: the entries of a group, then each child
+    group's subtree, then the group itself."""
+    ids = [str(e.uuid) for e in group.entries]
+    for child in group.subgroups:
+        ids += _destroyed_with(child)
+    ids.append(str(group.uuid))
+    return ids
 
 
 def _encode_uuid(text: str) -> str:
@@ -265,15 +292,60 @@ class KdbxVault(VaultBase):
                 return a.data
         raise KeyError(f"no attachment named {name!r}")
 
-    def deleted_ids(self) -> set[str]:
-        """Ids of entries and groups the file records as deleted (tombstones), for merging."""
-        out = set()
-        for element in _root(self.kp).findall("Root/DeletedObjects/DeletedObject/UUID"):
+    def _records(self) -> list[tuple[str, datetime | None, object]]:
+        """What `Root/DeletedObjects` holds: (id, deletion time or None, the element), in file order."""
+        section = _deleted_section(self.kp, False)
+        found = []
+        for element in section.findall("DeletedObject") if section is not None else []:
             try:
-                out.add(str(uuidlib.UUID(bytes=base64.b64decode(element.text))))
+                uid = str(uuidlib.UUID(bytes=base64.b64decode(element.findtext("UUID") or "")))
             except (ValueError, TypeError):
                 continue
+            text = element.findtext("DeletionTime")
+            try:
+                when = _aware(self.kp._decode_time(text)) if text else None
+            except Exception:  # noqa: BLE001 - an unreadable time is "unknown", not a reason to refuse the vault
+                when = None
+            found.append((uid, when, element))
+        return found
+
+    def deleted_ids(self) -> set[str]:
+        """Ids of entries and groups the file records as deleted (tombstones), for merging."""
+        return {uid for uid, _when, _element in self._records()}
+
+    def deletions(self) -> dict[str, datetime]:
+        """What the file records as deleted for good, by id, with the time of the deletion (the earliest where an id is listed
+        twice; a record without a readable time counts as the earliest possible)."""
+        out: dict[str, datetime] = {}
+        for uid, when, _element in self._records():
+            when = when or _UNKNOWN_TIME
+            if uid not in out or when < out[uid]:
+                out[uid] = when
         return out
+
+    def record_deleted(self, items: Mapping[str, datetime]) -> None:
+        """Say in the file that these ids were deleted for good, at these times (UTC): a record each, with both its parts.
+        An id that already has a record keeps the earlier of the two times."""
+        from lxml import etree
+
+        known = {}
+        for uid, when, element in self._records():
+            known.setdefault(uid, (when, element))
+        for uid, when in items.items():
+            when = _aware(when).astimezone(timezone.utc).replace(microsecond=0)  # the file keeps whole seconds
+            if uid not in known:
+                record = etree.SubElement(_deleted_section(self.kp, True), "DeletedObject")
+                etree.SubElement(record, "UUID").text = _encode_uuid(uid)
+                etree.SubElement(record, "DeletionTime").text = self.kp._encode_time(when)
+                known[uid] = (when, record)
+                continue
+            current, record = known[uid]
+            if current is None or when < current:
+                element = record.find("DeletionTime")
+                if element is None:
+                    element = etree.SubElement(record, "DeletionTime")
+                element.text = self.kp._encode_time(when)
+                known[uid] = (when, record)
 
     def bin_enabled(self) -> bool:
         return _root(self.kp).findtext("Meta/RecycleBinEnabled", default="True").strip().lower() != "false"
@@ -378,7 +450,20 @@ class KdbxVault(VaultBase):
         return str(group.uuid) if group is not None else None
 
     def purge_entry(self, eid: str) -> None:
-        self.kp.delete_entry(self._entry(eid))
+        """Delete an entry for good, and say so in the file (a record in `DeletedObjects`, as a client writes it): without the
+        record a merge cannot tell a deleted entry from one that never reached this copy."""
+        entry = self._entry(eid)
+        self.record_deleted({str(entry.uuid): datetime.now(timezone.utc)})
+        self.kp.delete_entry(entry)
+
+    def purge_group(self, gid: str) -> None:
+        """Delete a group for good with everything below it, and record every entry and every group that goes."""
+        group = self._group(gid)
+        if group.is_root_group or group.uuid == self._bin_uuid():
+            raise ValueError("the top group and the recycle bin are not deleted; empty the bin instead")
+        now = datetime.now(timezone.utc)
+        self.record_deleted({uid: now for uid in _destroyed_with(group)})
+        self.kp.delete_group(group)
 
     def _record_origin(self, owner, origin) -> None:
         """KDBX 4.1 and later have a place for it; older files get nothing (an unknown element could confuse their clients)."""
@@ -509,6 +594,13 @@ class KdbxVault(VaultBase):
     def empty_bin(self) -> None:
         rb = self.kp.recyclebin_group
         if rb is not None:
+            # pykeepass removes only the bin's direct children and takes their subtrees with them: record every one that goes
+            # (the bin itself stays)
+            now = datetime.now(timezone.utc)
+            ids = [str(e.uuid) for e in rb.entries]
+            for child in rb.subgroups:
+                ids += _destroyed_with(child)
+            self.record_deleted({uid: now for uid in ids})
             self.kp.empty_group(rb)
 
     # --- the database itself --------------------------------------------------------------------------------------------------------

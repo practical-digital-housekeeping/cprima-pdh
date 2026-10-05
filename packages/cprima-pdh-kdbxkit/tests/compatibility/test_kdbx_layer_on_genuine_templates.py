@@ -89,6 +89,34 @@ def test_trash_restore_and_purge_work_on_every_template(template):
     assert "keep" in titles and not titles["keep"].in_bin and "gone" not in titles
 
 
+def test_a_purge_leaves_a_record_in_the_time_form_of_the_format_on_every_template(template):
+    import base64
+    import re
+
+    from cprima_pdh_kdbxkit.kdbx_vault import _root
+
+    t, db = template
+
+    def build(vault):
+        root = next(g.id for g in vault.groups() if g.is_root)
+
+        def mutate(v):
+            group = v.add_group(root, "Money")
+            v.purge_entry(v.add_entry(group, EntryData(id="", group_path="", title="gone", password="y")))
+
+        return Plan(change="the report", mutate=mutate)
+
+    execute(lambda: opened(t, db), db, build, apply=True)
+    vault = opened(t, db)
+    text = _root(vault.kp).findtext("Root/DeletedObjects/DeletedObject/DeletionTime")
+    if t.format.startswith("KDBX 3"):  # ISO text
+        assert re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(Z|\+00:00)", text), text
+    else:  # base64 of 8 bytes, seconds since year 1
+        assert len(base64.b64decode(text)) == 8, text
+    assert len(vault.deletions()) == 1 and next(iter(vault.deletions().values())) <= datetime.now(timezone.utc)
+    assert vault.file_problems(db) == []  # a KDBX 3 header hash is still valid
+
+
 def test_a_changed_master_password_and_key_derivation_settings_survive_on_every_template(template):
     t, db = template
     vault = opened(t, db)
