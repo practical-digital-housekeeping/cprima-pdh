@@ -51,6 +51,9 @@ Use `-f json` for machine-readable output.
 | `kdbx` | KeePass KDBX 3.1, 4.0, 4.1 (AES, ChaCha20, Twofish; Argon2d, Argon2id, AES-KDF) | yes, everything in the table above | `cprima-pdh[kdbx]` |
 | `sops` | a [sops](https://github.com/getsops/sops) JSON file encrypted to age recipients | not yet | `cprima-pdh[sops]` |
 
+Each store is its own package in the repository (`cprima-pdh-kdbxkit`, `cprima-pdh-sopskit`) on top of a small interface package
+(`cprima-pdh-vault`); none of them knows the taxonomy, and they are bundled into the `cprima-pdh` wheel.
+
 pdh recognises the kind of file from its content, so `pdh --db secrets.enc.json inspect tree` just works. For a sops file the
 age identity comes from `--key FILE`, else `SOPS_AGE_KEY` / `SOPS_AGE_KEY_FILE`, else sops' default key file. One file is one vault:
 a mapping of mappings is a group, a mapping of scalars is an entry, a leaf is a field. Values sops encrypted are protected

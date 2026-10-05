@@ -64,22 +64,28 @@ The directory says what the test is about, so a marker does not have to be remem
 |---|---|---|
 | `unit/` | profile and schema parsing, link parsing, field rules, config, the public taxonomy tests | unit |
 | `engine/` | validation, conform, tree and the committed example vaults, on snapshots | integration |
-| `backends/` | the Vault contract over every backend, the KDBX write API, sops, the border guards, the KDBX 3.x header rule | integration, contract |
+| `backends/` | what pdh does with the layers (backend registration, selection, refusals), the border guards between packages, the KDBX 3.x header rule through the CLI | integration |
 | `commands/` | every command that changes a vault, import and merge, the database commands | integration |
 | `cli/` | CLI wiring, output, doctor, inspect and check commands, the README examples | system, acceptance |
 | `compatibility/` | the same behaviour on every genuine KeePassXC template | compatibility |
 | `interoperability/` | `keepassxc-cli` reads what pdh wrote | interoperability |
 
+The layers have their own tests, in their own packages (they must not need pdh): `packages/cprima-pdh-vault/tests/` holds the
+Vault contract, run over memory, a KDBX file and a sops file; `packages/cprima-pdh-kdbxkit/tests/` the KDBX write API;
+`packages/cprima-pdh-sopskit/tests/` the sops reader. A test that needs the pdh CLI, `txn`, `write` or the taxonomy stays in
+`packages/cprima-pdh/tests/`, because a layer's test must not import pdh.
+
 `conftest.py` marks everything under `compatibility/` and `interoperability/` accordingly, and any test whose id names a genuine
-template. A single interoperability test elsewhere (the real `sops` checks in `backends/test_sops_vault.py`) carries the marker
-itself. Both markers are excluded from the default run.
+template. A single interoperability test elsewhere (the real `sops` checks in `cprima-pdh-sopskit/tests/test_sops_vault.py`)
+carries the marker itself. Both markers are excluded from the default run.
 
 ### When to run what
 
 - **While working**: the tests of the module you change (`pytest packages/cprima-pdh/tests/test_x.py`, or `-k name`), then the default set.
 - **Before a commit**: the default set, green.
-- **After touching the KDBX backend, the save path, a file format or key derivation** (`backends/kdbx_vault.py`, `txn.py`,
-  `database.py`, `backends/sops_format.py`): the default set, then compatibility and interoperability.
+- **After touching the KDBX backend, the save path, a file format or key derivation** (`cprima-pdh-kdbxkit`,
+  `cprima-pdh-vault/transaction.py`, `cprima-pdh-sopskit`, pdh's `txn.py` and `database.py`): the default set, then
+  compatibility and interoperability.
 - **Before a release**: all three sets. A release is a moment, not a kind of test; the tests that matter then are the two
   that check other environments and other implementations, which daily work does not need.
 - **Never**: serial runs piped through `tail`, which print nothing until the end. Run in parallel and stream to a file.
@@ -109,10 +115,14 @@ and is optional.
 4. **Prefer the lowest level that shows the defect.** Engine rules are tested on snapshots (`EntryData`), not through the CLI. Use
    the CLI only to test the CLI. Run a command on a real file when the file format matters.
 5. **Test through the interface.** Anything that uses a vault goes through `Vault` and `execute_vault`. Only
-   `backends/kdbx*.py` may import `pykeepass`, import `lxml` or use `._element`; `test_backend_borders.py` enforces it. Tests that
-   build or inspect a fixture may use pykeepass directly.
-6. **Every backend answers the same contract.** A behaviour that is meant for every backend goes into `test_vault_contract.py`; one a
-   backend lacks must raise `Unsupported` (`test_unsupported_writes.py`).
+   `cprima-pdh-kdbxkit` may import `pykeepass`, import `lxml` or use `._element`; `test_backend_borders.py` enforces it, and
+   `test_package_borders.py` keeps the layers free of pdh and of each other. Tests that build or inspect a fixture may use
+   pykeepass directly.
+6. **Every backend answers the same contract.** A behaviour that is meant for every backend goes into
+   `packages/cprima-pdh-vault/tests/test_vault_contract.py`, which runs it on memory and on a real KDBX file (and the read side on a
+   sops file); memory is the test backend and is held to the same results as the others. A difference the contract finds is a
+   finding, written down in the test (the tombstone one is there). One a backend lacks must raise `Unsupported`
+   (`test_unsupported_writes.py`, with sops as the read-only example).
 7. **Writes**: assert what changed *and* what did not (the other entries, the file header, the history count). `execute_vault`
    verifies this on every write; a test of a new command asserts its own expected result as well.
 8. **Secrets**: never a real secret in a test or a fixture; the committed vaults use throwaway passwords. A test that checks output

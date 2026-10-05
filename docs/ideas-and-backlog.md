@@ -40,7 +40,7 @@ focus, 1Password and Bitwarden item and field types (see the sources in `TAXONOM
 
 The profile is the single source of truth; the engine only interprets it, and the `kdbx` backend (extra
 `cprima-pdh[kdbx]`) owns how it is stored in KeePass. Moved into the profile or the backend so far (2026-10-03):
-finding levels (`[level]`), standard fields (`[standard.*]`) and their KeePass storage (`backends/kdbx.py`:
+finding levels (`[level]`), standard fields (`[standard.*]`) and their KeePass storage (`cprima_pdh_kdbxkit/kdbx_format.py`:
 attribute mapping, protected standard fields, OTP plugin prefixes, how each field kind is stored), the list of field
 kinds (`[kind.*]`; `behaviour = "link"` marks the kind that holds an entry reference), the default area per record type
 (`area =` on `[schema.*]`) and example values (`example =` on kinds, terms and standard fields, checked against the
@@ -69,8 +69,8 @@ checks in `docs/testing/manual-e2e.md` (only a human with KeePassXC and KeePassD
 
 ## 2d. Vault interface and the sops+age backend  (IN PROGRESS, 2026-10-03)
 
-The engine reads snapshots (`EntryData`) from a `Vault` (`vault.py`); `backends/kdbx.py`, `backends/memory.py` and `backends/sops.py`
-implement it. Done: the interface and the contract tests; the validator, `read`, `links`, `unclassified`, `conform`, `tree`, `infer`,
+The engine reads snapshots (`EntryData`) from a `Vault` (`cprima_pdh_vault`); `cprima_pdh_kdbxkit`, `cprima_pdh_vault.memory` and `cprima_pdh_sopskit`
+implement it (separate packages in this repository, bundled into the `cprima-pdh` wheel). Done: the interface and the contract tests; the validator, `read`, `links`, `unclassified`, `conform`, `tree`, `infer`,
 `inventory`, `records`, `doctor` and the online/CSV/otp readers on snapshots (the XPath engine stays as the parity reference
 `*_xpath` until the write side has moved); read-only sops+age for JSON, verified against the real `sops` binary (values, MAC, several
 recipients, `mac_only_encrypted`). Next: the write side onto operations and `txn` (the KDBX workarounds move into `KdbxVault`), a temp-file
