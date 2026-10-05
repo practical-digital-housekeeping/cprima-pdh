@@ -1,6 +1,6 @@
 [project]
 name = "cprima-pdh-vault"
-version = "0.0.0"
+version = "0.0.1"
 description = "The vault interface of cprima-pdh: entries, groups, backends, and the one verified write path. No file format, no taxonomy."
 readme = "README.md"
 requires-python = ">=3.11"
