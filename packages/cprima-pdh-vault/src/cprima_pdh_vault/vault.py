@@ -1,12 +1,9 @@
 """The Vault interface: what the engine may ask of any store of entries.
 
-The engine (profile checks, tree, doctor, conform, online checks, command logic) talks to a `Vault` and to the immutable
-snapshots it hands out (`EntryData`, `GroupData`), never to a store's own objects. A backend (`backends/kdbx.py` for
-KeePass, `backends/memory.py` for tests, later `backends/sops.py`) implements the interface and keeps every quirk of its
-format to itself. What a backend cannot do is declared in `capabilities`; a command that needs one fails with a clear
-message (`require`) instead of faking it.
-
-Phase 0 of the refactoring: the read side. Write operations follow.
+A program that works on vaults talks to a `Vault` and to the immutable snapshots it hands out (`EntryData`, `GroupData`), never
+to a store's own objects. A backend (KeePass, sops, plain Python objects in `memory`) implements the interface and keeps every
+quirk of its format to itself. What a backend cannot do is declared in `capabilities`; a command that needs one fails with a
+clear message (`require`) instead of faking it.
 """
 from __future__ import annotations
 
@@ -14,7 +11,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Protocol, runtime_checkable
 
-# The standard fields every entry has, by the profile's names (see `[standard.*]`); how a store keeps them is its own business.
+# The standard fields every entry has, by name; how a store keeps them is its own business.
 STANDARD = ("Title", "UserName", "Password", "URL", "Notes", "otp")
 
 # What a backend may offer. `fields`, `groups` and `protected` are the read basics every backend has.
@@ -91,7 +88,7 @@ class EntryData:
         return f"{self.group_path}/{self.title}"
 
     def value(self, name: str) -> str:
-        """The value of a standard field by the profile's name."""
+        """The value of a standard field by its name."""
         return {"Title": self.title, "UserName": self.username, "Password": self.password, "URL": self.url,
                 "Notes": self.notes, "otp": self.otp}[name]
 
@@ -193,10 +190,15 @@ def resolve_entry(entries: list[EntryData], path: str, username: str | None = No
 _ADAPTERS: list = []
 
 
-def register_adapter(adapt) -> None:
+def register_adapter(adapt, *, first: bool = False) -> None:
     """A backend that can wrap a store's own object (`adapt(obj)` returns a Vault, or None when `obj` is not its kind)
-    registers here when its module is imported, so this module imports no backend."""
-    if adapt not in _ADAPTERS:
+    registers here when its module is imported, so this module imports no backend. The first adapter that answers wins:
+    a host that wants its own settings for those objects registers with `first=True`, ahead of the backend's default."""
+    if adapt in _ADAPTERS:
+        _ADAPTERS.remove(adapt)
+    if first:
+        _ADAPTERS.insert(0, adapt)
+    else:
         _ADAPTERS.append(adapt)
 
 

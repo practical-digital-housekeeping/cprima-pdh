@@ -34,6 +34,7 @@ from .credentials import Credentials, from_environment
 from .credentials import secret as as_secret
 from .generate import PasswordSettings
 from .models import ImportReport, OtpCode
+from .policy import KDBX_POLICY
 from .schema import SchemaSet
 from cprima_pdh_vault.vault import EntryData
 from .write import WriteError, find_data
@@ -116,7 +117,7 @@ class Vault:
             raise OpenError(f"the library opens KDBX vaults; a {kind} file is read by the command line")
         try:
             return KdbxVault.open(self._path, password.get_secret_value() if password else None,
-                                  str(self._credentials.keyfile) if self._credentials.keyfile else None)
+                                  str(self._credentials.keyfile) if self._credentials.keyfile else None, KDBX_POLICY)
         except Exception:  # noqa: BLE001 - whatever the store says, the caller gets one message that cannot carry a secret
             raise OpenError(f"cannot open {self._path.name}: wrong credentials, a damaged file or an unsupported format") from None
 

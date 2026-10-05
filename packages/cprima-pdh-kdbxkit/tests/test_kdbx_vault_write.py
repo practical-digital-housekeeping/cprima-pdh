@@ -121,7 +121,7 @@ def test_execute_replaces_only_after_verifying(db):
     assert change == "the report" and written is False and by_title(opened(db), "a").notes != "changed"
     change, written = execute(lambda: opened(db), db, build, apply=True)
     assert change == "the report" and written is True and by_title(opened(db), "a").notes == "changed"
-    assert not list(db.parent.glob("*.pdh-new*"))
+    assert not list(db.parent.glob("*.writing*"))
 
 
 def test_a_failed_verification_leaves_the_vault_alone(db):
@@ -134,7 +134,7 @@ def test_a_failed_verification_leaves_the_vault_alone(db):
 
     with pytest.raises(WriteError):
         execute(lambda: opened(db), db, build, apply=True)
-    assert db.read_bytes() == before and not list(db.parent.glob("*.pdh-new*"))
+    assert db.read_bytes() == before and not list(db.parent.glob("*.writing*"))
 
 
 # --- a delete leaves a record in `Root/DeletedObjects` -----------------------------------------------------------------------

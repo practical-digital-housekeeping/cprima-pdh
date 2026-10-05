@@ -12,9 +12,11 @@ from pydantic import BaseModel
 from cprima_pdh_vault.transaction import Plan, guard  # noqa: F401  (re-exported: commands import them from here)
 from cprima_pdh_vault.transaction import execute
 
+from .policy import WRITE_POLICY
+
 
 def execute_vault(open_vault, db: Path, build, apply: bool) -> BaseModel:
     """Run `build(vault)` (it returns a `Plan` whose change is a model with an `applied` field) on the opened vault; without
-    `apply` return its change untouched, else write, verify, and return it marked applied."""
-    change, written = execute(open_vault, db, build, apply)
+    `apply` return its change untouched, else write, verify, and return it marked applied. pdh's write policy applies."""
+    change, written = execute(open_vault, db, build, apply, WRITE_POLICY)
     return change.model_copy(update={"applied": True}) if written else change

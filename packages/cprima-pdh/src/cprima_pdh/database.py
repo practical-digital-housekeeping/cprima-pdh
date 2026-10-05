@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Callable
 
 from .models import DbBin, DbKdf, DbSettings, OrgChange
+from .policy import KDBX_POLICY
 from .txn import Plan, execute_vault
 from cprima_pdh_vault.vault import Vault, require
 from .write import WriteError
@@ -30,8 +31,8 @@ def create_vault(path: Path, password: str, keyfile: Path | None, apply: bool) -
     change = OrgChange(kind="db-create", target=str(path), dest="KDBX 4.0")
     if not apply:
         return change
-    KdbxVault.create(path, password, str(keyfile) if keyfile else None)
-    again = KdbxVault.open(path, password, str(keyfile) if keyfile else None)
+    KdbxVault.create(path, password, str(keyfile) if keyfile else None, KDBX_POLICY)
+    again = KdbxVault.open(path, password, str(keyfile) if keyfile else None, KDBX_POLICY)
     if again.info().format != "KDBX 4.0" or again.entries():
         raise WriteError("verification failed: the new vault is not an empty KDBX 4.0 file")
     return change.model_copy(update={"applied": True})

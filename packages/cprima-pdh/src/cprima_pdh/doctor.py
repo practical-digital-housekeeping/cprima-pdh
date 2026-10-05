@@ -20,7 +20,7 @@ from typing import Callable
 from . import __version__, backends, session
 from cprima_pdh_kdbxkit.kdbx_format import OTP_PREFIXES
 from .models import DoctorCheck, DoctorReport
-from .write import _lock_files
+from .policy import WRITE_POLICY
 
 _SIGNATURE = bytes.fromhex("03d9a29a67fb4bb5")  # KeePass 2.x file signature
 _CIPHERS = {"31c1f2e6bf714350be5805216afc5aff": "AES-256", "d6038a2b8b6f4cb5a524339a31dbb59a": "ChaCha20",
@@ -191,16 +191,16 @@ def diagnose(db: Path | None, taxonomy: Callable[[], object], taxonomy_source: s
     r.add("file", "format", "warn" if weak else "ok",
           f"{h['format']} · {h.get('cipher', 'unknown cipher')} · {kdf} · compression {h.get('compression', '?')}",
           "raise the key derivation cost in the client (Database Security)" if weak else "")
-    locks = _lock_files(db)
+    locks = WRITE_POLICY.lock_files(db)
     conflicts = sorted(db.parent.glob(f"{db.stem}.sync-conflict-*{db.suffix}"))
     if locks:
-        r.add("file", "in use", "warn", f"lock file {locks[0].name}: open in a client",
-              "quit the client fully (tray > Quit) before `pdh edit ... --apply`")
+        r.add("file", "in use", "warn", f"lock file {locks[0].name}: another program has the vault open",
+              "close the vault in that program before `pdh edit ... --apply`")
     if conflicts:
         r.add("file", "in use", "warn", f"{len(conflicts)} sync-conflict cop{'y' if len(conflicts) == 1 else 'ies'}",
               f"merge or delete them in the client, e.g. {conflicts[0].name}")
     if not locks and not conflicts:
-        r.add("file", "in use", "ok", "no lock file, no sync conflict")
+        r.add("file", "in use", "ok", "no lock file, no sync conflict (a program that makes no lock file, KeePassXC for one, is not seen)")
 
     if not (unlocked_here and kdbx_ready):
         r.add("file", "contents", "skip", "needs an unlocked session")

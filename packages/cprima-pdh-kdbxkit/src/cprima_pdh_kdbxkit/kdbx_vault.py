@@ -20,6 +20,7 @@ import hashlib
 import os
 import uuid as uuidlib
 from collections.abc import Mapping
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -28,10 +29,26 @@ from .kdbx_format import STANDARD_ATTR, kdf_name
 
 # KDBX versions whose writing has been verified against genuine KeePassXC files (3.1, 4.0 and 4.1 templates); anything else
 # can be read but is not written.
-VERIFIED_FORMATS = {(3, 1), (4, 0), (4, 1)}
+VERIFIED_FORMATS = frozenset({(3, 1), (4, 0), (4, 1)})
 # What `Meta/Generator` says after this layer wrote the file. The element is free text naming the program that wrote the file;
 # a file made by a client keeps that client's name until we write it, and pykeepass would leave "KeePassXC" in every new vault.
 GENERATOR = "cprima-pdh-kdbxkit"
+
+
+@dataclass(frozen=True)
+class KdbxPolicy:
+    """The choices of this layer, with defaults. A program that uses the layer makes one instance in its own module and passes
+    it when it opens or creates a vault; the vault keeps it (a reopened vault has the same one)."""
+
+    # The text written into `Meta/Generator` on every save and when a vault is created. None leaves the element as it is,
+    # which is what KeePassXC does with a file it did not make.
+    generator: str | None = GENERATOR
+    # The KDBX versions (major, minor) this layer will write. The default is what has been verified against genuine KeePassXC
+    # files; a file of another version can be read but not changed. None writes any version pykeepass can save.
+    writable_formats: frozenset[tuple[int, int]] | None = VERIFIED_FORMATS
+
+
+DEFAULT_KDBX_POLICY = KdbxPolicy()
 SETTINGS = {  # name -> (Meta element, element holding its change time or None)
     "name": ("DatabaseName", "DatabaseNameChanged"),
     "description": ("DatabaseDescription", "DatabaseDescriptionChanged"),
@@ -80,10 +97,10 @@ def _set_element(owner, tag: str, value: str) -> None:
     element.text = value or None
 
 
-def _write_generator(kp) -> None:
-    """Say in the file that this layer wrote it (`Meta/Generator`, the first element of `Meta`)."""
+def _write_generator(kp, generator: str | None = GENERATOR) -> None:
+    """Say in the file which program wrote it (`Meta/Generator`, the first element of `Meta`); None leaves it as it is."""
     meta = _root(kp).find("Meta")
-    if meta is None:
+    if meta is None or generator is None:
         return
     element = meta.find("Generator")
     if element is None:
@@ -91,7 +108,7 @@ def _write_generator(kp) -> None:
 
         element = etree.Element("Generator")
         meta.insert(0, element)
-    element.text = GENERATOR
+    element.text = generator
 
 
 _UNKNOWN_TIME = datetime.min.replace(tzinfo=timezone.utc)  # a record without a readable time: nothing can be shown to be newer
@@ -196,23 +213,31 @@ class KdbxVault(VaultBase):
         "history", "attachments", "recycle_bin", "credentials", "kdf", "settings", "create", "tombstones",
     })
 
-    def __init__(self, kp, path=None):
+    def __init__(self, kp, path=None, policy: KdbxPolicy = DEFAULT_KDBX_POLICY):
         self.kp = kp
         self.path = Path(path) if path else None
+        self.policy = policy
 
     @classmethod
-    def open(cls, path, password: str | None, keyfile: str | None = None) -> KdbxVault:
-        return cls(pykeepass_open(path, password, keyfile), path)
+    def open(cls, path, password: str | None, keyfile: str | None = None,
+             policy: KdbxPolicy = DEFAULT_KDBX_POLICY) -> KdbxVault:
+        return cls(pykeepass_open(path, password, keyfile), path, policy)
 
     @classmethod
-    def create(cls, path, password: str, keyfile: str | None = None) -> KdbxVault:
+    def create(cls, path, password: str, keyfile: str | None = None,
+               policy: KdbxPolicy = DEFAULT_KDBX_POLICY) -> KdbxVault:
         """A new, empty KDBX 4.0 file (KeePass' default key derivation), saved at `path`."""
         from pykeepass import create_database
 
         kp = create_database(str(path), password=password, keyfile=str(keyfile) if keyfile else None)
-        _write_generator(kp)
+        _write_generator(kp, policy.generator)
         kp.save()
-        return cls(kp, path)
+        return cls(kp, path, policy)
+
+    @classmethod
+    def adapter(cls, policy: KdbxPolicy):
+        """An adapter for `cprima_pdh_vault.vault.register_adapter` that wraps an opened pykeepass database with `policy`."""
+        return lambda kp: cls(kp, policy=policy)
 
     def can_open(self, password: str | None, keyfile: str | None = None, path=None) -> bool:
         """Whether the file at `path` (default: this vault's own) opens with these credentials."""
@@ -671,22 +696,22 @@ class KdbxVault(VaultBase):
                     element.text = self.kp._encode_time(datetime.now(timezone.utc))
 
     def check_writable(self) -> list[str]:
-        """Why this file must not be written, if it must not: formats nobody has verified writing."""
+        """Why this file must not be written, if it must not: a KDBX version outside the policy's `writable_formats`."""
         version = tuple(self.kp.version)
-        if version not in VERIFIED_FORMATS:
-            return [f"pdh has not been verified to write KDBX {version[0]}.{version[1]}; it reads it but does not change it"]
+        if self.policy.writable_formats is not None and version not in self.policy.writable_formats:
+            return [f"writing KDBX {version[0]}.{version[1]} has not been verified; it can be read but is not changed"]
         return []
 
     def save(self, path: str | Path | None = None) -> None:
         """Save (to `path`, else the file it was opened from), keeping a KDBX 3.x header hash valid. The file then says in
-        `Meta/Generator` that this layer wrote it."""
-        _write_generator(self.kp)
+        `Meta/Generator` what the policy says (by default, that this layer wrote it)."""
+        _write_generator(self.kp, self.policy.generator)
         save_vault(self.kp, path if path else self.path)
 
     def reopen(self, path: str | Path | None = None) -> KdbxVault:
-        """The file as it is on disk now, opened with the same credentials."""
+        """The file as it is on disk now, opened with the same credentials and the same policy."""
         target = Path(path) if path else self.path
-        return KdbxVault(pykeepass_open(target, self.kp.password, self.kp.keyfile), target)
+        return KdbxVault(pykeepass_open(target, self.kp.password, self.kp.keyfile), target, self.policy)
 
     def file_problems(self, path: str | Path | None = None) -> list[str]:
         """Checks only the written file can show: a KDBX 3.x file must carry the hash of its own header."""

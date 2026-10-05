@@ -1,4 +1,4 @@
-"""What the KDBX (KeePass) format says, independent of any taxonomy: how the standard fields are stored, which attributes the
+"""What the KDBX (KeePass) format says, independent of any program that uses it: how the standard fields are stored, which attributes the
 ecosystem treats as secrets, how the one-time-password plugin keeps its settings, which key derivation a file names.
 
 Only the standard library is imported here, so this is available without the `[kdbx]` extra; pykeepass itself is loaded only
@@ -6,7 +6,7 @@ by the code that opens a vault (`kdbx_vault.py`). Another store (Bitwarden, 1Pas
 """
 from __future__ import annotations
 
-# standard fields of the profile -> the pykeepass attribute that holds them (`otp` is the TOTP/HOTP secret)
+# the standard fields, by name -> the pykeepass attribute that holds them (`otp` is the TOTP/HOTP secret)
 STANDARD_ATTR = {
     "Title": "title", "UserName": "username", "Password": "password", "URL": "url", "Notes": "notes", "otp": "otp",
 }

@@ -8,7 +8,6 @@ from cprima_pdh_kdbxkit.kdbx_format import STANDARD_ATTR, STANDARD_PROTECTED
 from . import boundary
 from .models import Change
 from .schema import make_ref, uuid_key
-from cprima_pdh_vault.transaction import _fingerprint, _lock_files  # noqa: F401  (re-exported: `doctor` imports `_lock_files` from here)
 from cprima_pdh_vault.vault import Vault, WriteError, as_vault, find_data  # noqa: F401  (re-exported: most of the engine imports them from here)
 
 _HIDDEN = "(hidden)"
