@@ -1,6 +1,6 @@
 [project]
 name = "cprima-pdh-kdbxkit"
-version = "0.0.0"
+version = "0.0.1"
 description = "KeePass (KDBX) vaults for cprima-pdh: a layer on pykeepass with verified writes. No taxonomy."
 readme = "README.md"
 requires-python = ">=3.11"

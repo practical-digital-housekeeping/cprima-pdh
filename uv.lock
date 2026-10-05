@@ -253,7 +253,7 @@ provides-extras = ["kdbx", "sops", "all"]
 
 [[package]]
 name = "cprima-pdh-kdbxkit"
-version = "0.0.0"
+version = "0.0.1"
 source = { editable = "packages/cprima-pdh-kdbxkit" }
 dependencies = [
     { name = "cprima-pdh-vault" },
@@ -270,7 +270,7 @@ requires-dist = [
 
 [[package]]
 name = "cprima-pdh-sopskit"
-version = "0.0.0"
+version = "0.0.1"
 source = { editable = "packages/cprima-pdh-sopskit" }
 dependencies = [
     { name = "cprima-pdh-vault" },

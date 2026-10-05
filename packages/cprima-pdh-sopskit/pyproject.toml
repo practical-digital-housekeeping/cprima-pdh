@@ -1,6 +1,6 @@
 [project]
 name = "cprima-pdh-sopskit"
-version = "0.0.0"
+version = "0.0.1"
 description = "sops files encrypted to age recipients, read as a vault, for cprima-pdh. Read-only. No taxonomy."
 readme = "README.md"
 requires-python = ">=3.11"

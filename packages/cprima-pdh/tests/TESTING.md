@@ -71,7 +71,8 @@ The directory says what the test is about, so a marker does not have to be remem
 | `interoperability/` | `keepassxc-cli` reads what pdh wrote | interoperability |
 
 The layers have their own tests, in their own packages (they must not need pdh): `packages/cprima-pdh-vault/tests/` holds the
-Vault contract, run over memory, a KDBX file and a sops file; `packages/cprima-pdh-kdbxkit/tests/` the KDBX write API;
+Vault contract, run over memory, a KDBX file and a sops file; `packages/cprima-pdh-kdbxkit/tests/` the KDBX write API, the KDBX 3.x header rule and (in `compatibility/`) the layer on every
+genuine template;
 `packages/cprima-pdh-sopskit/tests/` the sops reader. A test that needs the pdh CLI, `txn`, `write` or the taxonomy stays in
 `packages/cprima-pdh/tests/`, because a layer's test must not import pdh.
 

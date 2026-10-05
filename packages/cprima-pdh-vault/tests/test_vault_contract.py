@@ -172,6 +172,34 @@ def test_every_backend_names_itself_and_declares_the_read_basics(any_vault):
     require(any_vault, "fields")
 
 
+def test_every_backends_groups_form_one_tree_whose_paths_follow_the_names(any_vault):
+    groups = {g.id: g for g in any_vault.groups()}
+    for g in groups.values():
+        if g.is_root:
+            assert g.parent_id is None and g.path == "/"
+            continue
+        parent = groups[g.parent_id]  # a parent that is not a group of the vault is a defect
+        assert g.path == (g.name if parent.is_root else f"{parent.path}/{g.name}")
+
+
+def test_every_backends_snapshots_are_stable_complete_and_cannot_be_changed(any_vault):
+    first, second = any_vault.entries(), any_vault.entries()
+    assert [(e.id, e.path, e.fields) for e in first] == [(e.id, e.path, e.fields) for e in second]
+    for e in first:
+        assert "Title" in e.names() and e.protected_standard <= set(STANDARD)
+        assert all(isinstance(f, Field) and isinstance(f.protected, bool) for f in e.fields.values())
+        with pytest.raises(Exception):  # a frozen snapshot: the vault is changed through its operations, never through this
+            e.title = "changed"
+
+
+def test_every_backend_counts_what_it_holds_the_same_way(any_vault):
+    entries, groups = any_vault.entries(), any_vault.groups()
+    live = [e for e in entries if not e.in_bin]
+    assert len(live) + sum(1 for e in entries if e.in_bin) == len(entries)
+    held = {e.group_id for e in entries}
+    assert held <= {g.id for g in groups}
+
+
 def test_every_backend_says_whether_it_can_be_written(any_vault):
     problems = any_vault.check_writable()
     assert isinstance(problems, list)

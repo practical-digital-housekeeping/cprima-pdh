@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 import pytest
 from pdh_testkit import DEFAULT_PASSWORD, Entry, synthetic_vault
 
-from cprima_pdh_kdbxkit.kdbx_vault import KdbxVault
+from cprima_pdh_kdbxkit.kdbx_vault import GENERATOR, KdbxVault
 from cprima_pdh_vault.transaction import Plan, execute
 from cprima_pdh_vault.vault import WriteError
 
@@ -135,3 +135,41 @@ def test_a_failed_verification_leaves_the_vault_alone(db):
     with pytest.raises(WriteError):
         execute(lambda: opened(db), db, build, apply=True)
     assert db.read_bytes() == before and not list(db.parent.glob("*.pdh-new*"))
+
+
+# --- the file says which program wrote it (`Meta/Generator`) -----------------------------------------------------------------
+
+def test_a_save_writes_the_layers_name_as_the_generator(db):
+    assert opened(db).info().generator != GENERATOR  # a vault made by another program says that program's name
+
+    def build(vault):
+        eid = by_title(vault, "a").id
+        return Plan(change="the report", mutate=lambda v: v.set_field(eid, "Notes", "changed"), touched={eid})
+
+    execute(lambda: opened(db), db, build, apply=True)
+    assert opened(db).info().generator == GENERATOR == "cprima-pdh-kdbxkit"
+
+
+def test_a_dry_run_leaves_the_generator_alone(db):
+    before = opened(db).info().generator
+
+    def build(vault):
+        eid = by_title(vault, "a").id
+        return Plan(change="the report", mutate=lambda v: v.set_field(eid, "Notes", "changed"), touched={eid})
+
+    execute(lambda: opened(db), db, build, apply=False)
+    assert opened(db).info().generator == before
+
+
+def test_a_new_vault_names_the_layer_as_its_generator(tmp_path):
+    made = KdbxVault.create(tmp_path / "new.kdbx", "pw")
+    assert made.info().generator == GENERATOR
+    assert KdbxVault.open(tmp_path / "new.kdbx", "pw").info().generator == GENERATOR
+
+
+def test_the_generator_is_the_first_element_of_meta(tmp_path):
+    from cprima_pdh_kdbxkit.kdbx_vault import _root
+
+    made = KdbxVault.create(tmp_path / "new.kdbx", "pw")
+    meta = _root(KdbxVault.open(tmp_path / "new.kdbx", "pw").kp).find("Meta")
+    assert meta[0].tag == "Generator" and meta[0].text == GENERATOR and made is not None

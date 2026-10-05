@@ -28,6 +28,9 @@ from .kdbx_format import STANDARD_ATTR, kdf_name
 # KDBX versions whose writing has been verified against genuine KeePassXC files (3.1, 4.0 and 4.1 templates); anything else
 # can be read but is not written.
 VERIFIED_FORMATS = {(3, 1), (4, 0), (4, 1)}
+# What `Meta/Generator` says after this layer wrote the file. The element is free text naming the program that wrote the file;
+# a file made by a client keeps that client's name until we write it, and pykeepass would leave "KeePassXC" in every new vault.
+GENERATOR = "cprima-pdh-kdbxkit"
 SETTINGS = {  # name -> (Meta element, element holding its change time or None)
     "name": ("DatabaseName", "DatabaseNameChanged"),
     "description": ("DatabaseDescription", "DatabaseDescriptionChanged"),
@@ -74,6 +77,20 @@ def _set_element(owner, tag: str, value: str) -> None:
 
         element = etree.SubElement(owner._element, tag)
     element.text = value or None
+
+
+def _write_generator(kp) -> None:
+    """Say in the file that this layer wrote it (`Meta/Generator`, the first element of `Meta`)."""
+    meta = _root(kp).find("Meta")
+    if meta is None:
+        return
+    element = meta.find("Generator")
+    if element is None:
+        from lxml import etree
+
+        element = etree.Element("Generator")
+        meta.insert(0, element)
+    element.text = GENERATOR
 
 
 def _encode_uuid(text: str) -> str:
@@ -166,6 +183,7 @@ class KdbxVault(VaultBase):
         from pykeepass import create_database
 
         kp = create_database(str(path), password=password, keyfile=str(keyfile) if keyfile else None)
+        _write_generator(kp)
         kp.save()
         return cls(kp, path)
 
@@ -568,7 +586,9 @@ class KdbxVault(VaultBase):
         return []
 
     def save(self, path: str | Path | None = None) -> None:
-        """Save (to `path`, else the file it was opened from), keeping a KDBX 3.x header hash valid."""
+        """Save (to `path`, else the file it was opened from), keeping a KDBX 3.x header hash valid. The file then says in
+        `Meta/Generator` that this layer wrote it."""
+        _write_generator(self.kp)
         save_vault(self.kp, path if path else self.path)
 
     def reopen(self, path: str | Path | None = None) -> KdbxVault:
