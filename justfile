@@ -19,7 +19,7 @@ test-par:
 test-interoperability:
     uv run --all-packages --all-extras pytest -q -n auto -m "interoperability and not compatibility"
 
-# compatibility: the same behaviour on every genuine template (all KDBX versions, ciphers, key derivations); about an hour
+# compatibility: the same behaviour on every genuine template (all KDBX versions, ciphers, key derivations); a few minutes on all cores
 test-compatibility:
     uv run --all-packages --all-extras pytest -q -n auto -m compatibility
 

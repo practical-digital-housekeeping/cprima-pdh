@@ -17,6 +17,6 @@ testpaths = ["packages/cprima-pdh/tests", "packages/cprima-pdh-vault/tests", "pa
              "packages/cprima-pdh-sopskit/tests", "packages/pdh-testkit/tests"]
 addopts = "-m 'not compatibility and not interoperability' --strict-markers --durations=10"
 markers = [
-    "compatibility: the same behaviour across every genuine template (all KDBX versions, ciphers, key derivations; about an hour); run with `just test-compatibility`",
+    "compatibility: the same behaviour across every genuine template (all KDBX versions, ciphers, key derivations; a few minutes on all cores); run with `just test-compatibility`",
     "interoperability: an independent program (keepassxc-cli, sops, age) reads or checks what pdh wrote; run with `just test-interoperability`",
 ]
