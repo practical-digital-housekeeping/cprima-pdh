@@ -242,6 +242,43 @@ class MergeReport(Frozen):
     applied: bool = False
 
 
+MergeChangeKind = Literal["add", "update", "move", "trash", "delete", "delete-group"]
+MergeConflictKind = Literal["both-modified", "deleted-there-modified-here", "deleted-here-modified-there"]
+MergeChoice = Literal["mine", "theirs", "keep", "delete"]
+
+
+class MergeChange(Frozen):
+    """One thing a merge does by itself, because nothing is lost by it."""
+    kind: MergeChangeKind
+    id: str  # the entry's (or, for delete-group, the group's) id
+    path: str
+
+
+class MergeConflict(Frozen):
+    """Where one copy's change would be dropped by the other's: a person decides. Names, ids, paths and times only, never a value."""
+    id: str
+    path: str
+    kind: MergeConflictKind
+    fields: list[str] = Field(default_factory=list)  # both-modified: the names of the fields that differ
+    mine_modified: datetime | None = None  # last modification in this vault
+    theirs_modified: datetime | None = None  # last modification in the other copy
+    deleted_at: datetime | None = None  # when the deletion was recorded, for the deletion conflicts
+    choices: list[MergeChoice] = Field(default_factory=list)  # what may be answered
+    reason: str = ""
+
+
+class MergeSituation(Frozen):
+    """What merging another copy into this vault would do, as data. Nothing is written and nothing is asked: a renderer shows it,
+    a person (or a program) answers the conflicts, `merge_apply` writes."""
+    source: str
+    clean: list[MergeChange] = Field(default_factory=list)
+    conflicts: list[MergeConflict] = Field(default_factory=list)
+    unchanged: int = 0
+    skipped: int = 0  # not brought back: in the other copy's bin, or deleted here and not changed since
+    groups_kept: int = 0  # a deleted group that still holds something stays
+    records_to_copy: int = 0  # deletion records this vault lacks (or has with a later time)
+
+
 class Generated(Frozen):
     """A generated password or passphrase. It is printed on purpose: the owner asked for it."""
     kind: str  # password | passphrase
