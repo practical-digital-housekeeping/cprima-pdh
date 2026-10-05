@@ -127,6 +127,7 @@ def test_a_merge_keeps_the_modification_time_of_the_copy_it_took_the_entry_from(
     shutil.copyfile(vault, other)
     kp = pykeepass_open(other, DEFAULT_PASSWORD, None)
     e = next(x for x in kp.entries if x.title == "a")
+    e.save_history()  # a client keeps the state an edit replaces; the merge reads the order of two copies from it
     e.notes = "from the copy"
     stamp = datetime(2024, 5, 6, 7, 8, 9, tzinfo=timezone.utc)
     e.mtime = stamp

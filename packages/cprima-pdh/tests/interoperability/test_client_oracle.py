@@ -169,6 +169,7 @@ def test_an_imported_vault_and_a_merge_are_read_back(vault, tmp_path):
     shutil.copyfile(vault.path_, twin)
     twin_kp = pykeepass_open(twin, DEFAULT_PASSWORD, None)
     entry = next(e for e in twin_kp.entries if e.title == "Soon")
+    entry.save_history()  # a client keeps the state an edit replaces; the merge reads the order of two copies from it
     entry.notes = "edited in the copy"
     entry.touch(modify=True)
     twin_kp.save()
@@ -221,6 +222,27 @@ def test_a_purge_by_pdh_is_a_record_the_client_reads(vault):
     records = recorded_deletions(vault.path_, vault.password)
     assert set(records) == {eid} and records[eid]  # the client sees the record, with both parts
     assert "Recycle Bin/Tagged" not in listing(vault.path_, vault.password)  # and still opens the file
+
+
+def test_a_deletion_that_a_merge_applies_is_a_record_the_client_reads(vault, tmp_path):
+    """The other copy purged an entry; pdh merges it in: the entry goes and the client sees the record, with its time."""
+    from cprima_pdh_kdbxkit.kdbx_vault import KdbxVault
+
+    other = tmp_path / "other.kdbx"
+    shutil.copyfile(vault.path_, other)
+    eid = next(e.id for e in KdbxVault.open(other, vault.password).entries() if e.title == "Soon")
+
+    def pdh(db, *args, env=None):
+        result = CliRunner().invoke(app, ["--db", str(db), *args], env=env)
+        assert result.exit_code == 0, f"pdh {' '.join(args)}: {result.output}{result.stderr or ''}"
+
+    pdh(other, "edit", "delete", "Other/Soon", "--apply")
+    pdh(other, "edit", "purge", "Recycle Bin/Soon", "--apply")
+    assert recorded_deletions(vault.path_, vault.password) == {}  # not in this copy yet
+    pdh(vault.path_, "io", "merge", str(other), "--apply", env={"PDH_IMPORT_PASSWORD": vault.password})
+    records = recorded_deletions(vault.path_, vault.password)
+    assert set(records) == {eid} and records[eid]
+    assert "Other/Soon" not in listing(vault.path_, vault.password)
 
 
 @pytest.mark.compatibility

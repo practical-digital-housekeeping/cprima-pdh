@@ -18,6 +18,7 @@ from .models import (
     EntryList,
     FillReport,
     GroupNode,
+    MergeReport,
     ProfileList,
     SessionState,
     TaxonomyDoc,
@@ -84,6 +85,36 @@ def _(data: FillReport, ascii_only: bool = False) -> str:
                  f"{data.generated} generated, {data.typed} typed, {data.skipped} skipped"
                  f"{'' if data.applied or not data.items else ' (a dry run: nothing was asked or written; add --apply)'}\n")
     return "".join(lines)
+
+
+def _moment(value) -> str:
+    return value.strftime("%Y-%m-%d %H:%M:%S") if value is not None else "unknown"
+
+
+@to_text.register
+def _(data: MergeReport, ascii_only: bool = False) -> str:
+    """What a merge does by itself, then the conflicts a person decides. Names, ids, paths and times; never a value."""
+    out = [f"merging {data.source} into this vault\n"]
+    out += [f"  {c.kind:12} {c.path}\n" for c in data.changes]
+    if data.conflicts:
+        out.append("conflicts (decide each one; while any is open nothing is written):\n")
+        for c in data.conflicts:
+            out.append(f"  {c.id}  {c.path}\n    {c.reason}\n")
+            if c.fields:
+                out.append(f"    differing fields: {', '.join(c.fields)}\n")
+            when = [f"this vault changed {_moment(c.mine_modified)}" if c.mine_modified else "",
+                    f"the other copy changed {_moment(c.theirs_modified)}" if c.theirs_modified else "",
+                    f"deleted {_moment(c.deleted_at)}" if c.deleted_at else ""]
+            out.append(f"    {'; '.join(w for w in when if w)}\n")
+            out.append(f"    answer with --resolve {c.id}=<{'|'.join(c.choices)}>\n")
+    tail = [f"{data.added} added, {data.updated} updated, {data.moved} moved, {data.trashed} to the bin, "
+            f"{data.deleted} deleted, {data.groups_deleted} group(s) deleted, {data.unchanged} unchanged, {data.skipped} skipped"]
+    if data.unresolved:
+        tail.append(f"{data.unresolved} conflict(s) open: nothing was written")
+    elif not data.applied and (data.entries or data.records_copied):
+        tail.append("a dry run: nothing was written; add --apply")
+    out.append("; ".join(tail) + "\n")
+    return "".join(out)
 
 
 @to_text.register

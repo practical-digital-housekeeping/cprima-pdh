@@ -123,6 +123,7 @@ def edit(db, title, **changes):
     kp = load(db)
     e = next(x for x in kp.entries if x.title == title)
     when = changes.pop("when", datetime.now(timezone.utc) + timedelta(hours=1))
+    e.save_history()  # a client keeps the state an edit replaces; the order of two copies is read from it
     for k, v in changes.items():
         setattr(e, k, v)
     e.mtime = when

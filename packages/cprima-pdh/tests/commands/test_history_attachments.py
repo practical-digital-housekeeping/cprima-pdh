@@ -164,6 +164,7 @@ def test_a_merge_takes_over_the_removal_of_an_otp(tmp_path):
     shutil.copyfile(local, other)
     ko = PyKeePass(str(other), password=DEFAULT_PASSWORD)
     t = next(x for x in ko.entries if x.title == "Tagged")
+    t.save_history()  # a client keeps the state an edit replaces; the merge reads the order of two copies from it
     t._element.remove(t._element.xpath("String[Key='otp']")[0])  # the other copy dropped its otp, later
     t.mtime = datetime.now(timezone.utc) + timedelta(hours=1)
     ko.save()

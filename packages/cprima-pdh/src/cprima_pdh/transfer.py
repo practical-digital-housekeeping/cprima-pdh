@@ -1,17 +1,21 @@
 """Bringing data into a vault: CSV import, import from another vault, and merging two copies of one vault.
 
 All of it runs through `txn.execute_vault`: dry run unless `apply`, one save, reopened and verified. Reports name entries
-and counts, never values. Merging is by UUID and modification time: the newer state wins and the replaced state is kept
-in the entry's history; nothing is deleted because the other copy lacks it.
+and counts, never values. Merging works the way git merges (see `merge.py`): by UUID, what loses nothing is done by itself, a
+change that would be dropped is a conflict a person answers, and the state a change replaces is kept in the entry's history.
+An entry is only removed by a deletion record of the other copy, never because that copy lacks it.
 """
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable
 
 from . import boundary, secret_fields, spreadsheet
 from .history import _state
+from .merge import _deletions as _records_of
+from .merge import merge_situation
 from .models import ImportReport, MergeReport
 from .schema import SchemaSet
 from .txn import Plan, execute_vault
@@ -243,78 +247,107 @@ def _group_like(vault: Vault, other_groups: dict[str, GroupData], gid: str) -> s
     return vault.add_group(parent_id, src.name, icon=src.icon, notes=src.notes, keep_id=gid)
 
 
-def merge_vaults(open_db: Callable[[], object], db: Path, open_other: Callable[[], object], source: str,
-                 apply: bool) -> MergeReport:
-    """Merge another copy of this vault: add what is missing, take newer states, follow moves. Deletes nothing."""
+# What `--prefer` answers for each kind of conflict: "mine" is this vault's side, "theirs" the other copy's.
+_PREFER = {
+    "mine": {"both-modified": "mine", "deleted-there-modified-here": "keep", "deleted-here-modified-there": "delete"},
+    "theirs": {"both-modified": "theirs", "deleted-there-modified-here": "delete", "deleted-here-modified-there": "keep"},
+}
+
+
+def merge_vaults(open_db: Callable[[], object], db: Path, open_other: Callable[[], object], source: str, apply: bool,
+                 resolutions: Mapping[str, str] | None = None, prefer: str | None = None) -> MergeReport:
+    """Merge another copy of this vault into this one, the way git merges (`merge.merge_situation` works out what happens):
+    what loses nothing is done by itself, a conflict is answered by `resolutions` (the conflict's id to its answer) or, for every
+    one not answered, by `prefer` ("mine" or "theirs"), and while any conflict is open nothing is written. Deletions follow the
+    deletion records of the other copy; this vault's own records and the other copy's are kept together. One verified write."""
+    answers = dict(resolutions or {})
 
     def build(vault: Vault) -> Plan:
         other = as_vault(open_other())
-        local = {e.id: e for e in vault.entries()}
-        gone = vault.deleted_ids()
-        add, update, move, trash = [], [], [], []
-        unchanged = skipped = 0
-        for src in other.entries():
-            mine = local.get(src.id)
-            if mine is None:
-                if src.in_bin or src.id in gone:
-                    skipped += 1
-                else:
-                    add.append(src)
-                continue
-            theirs_newer_place = (src.location_changed or _EARLIEST) > (mine.location_changed or _EARLIEST)
-            if src.in_bin and not mine.in_bin and theirs_newer_place:
-                trash.append(mine)
-                continue
-            if not src.in_bin and theirs_newer_place and mine.group_id != src.group_id:
-                move.append((src, mine))
-            if _state(src) != _state(mine) and (src.mtime or _EARLIEST) > (mine.mtime or _EARLIEST):
-                update.append((src, mine))
-            elif _state(src) == _state(mine) and not (move and move[-1][1] is mine):
-                unchanged += 1
-        report = MergeReport(source=source, added=len(add), updated=len(update), moved=len(move), trashed=len(trash),
-                             unchanged=unchanged, skipped=skipped,
-                             entries=sorted({e.path for e in [*add, *(m for _, m in update), *(m for _, m in move), *trash]}))
-        if not (add or update or move or trash):
-            return Plan(change=report)
-        touched = {m.id for _, m in update} | {m.id for _, m in move} | {m.id for m in trash}
-        src_by = {e.id: e for e in other.entries()}
+        situation = merge_situation(vault, other, source)
+        by_id = {c.id: c for c in situation.conflicts}
+        for uid, choice in answers.items():
+            if uid not in by_id:
+                raise WriteError(f"{uid} is not a conflict of this merge")
+            if choice not in by_id[uid].choices:
+                raise WriteError(f"{choice!r} is not an answer for {by_id[uid].path}: it is {' or '.join(by_id[uid].choices)}")
+        decided = dict(answers)
+        if prefer:
+            for c in situation.conflicts:
+                decided.setdefault(c.id, _PREFER[prefer][c.kind])
+        open_conflicts = [c for c in situation.conflicts if c.id not in decided]
+
+        mine = {e.id: e for e in vault.entries()}
+        theirs = {e.id: e for e in other.entries()}
+        by_kind: dict[str, list[str]] = {k: [] for k in ("add", "update", "move", "trash", "delete", "delete-group")}
+        for change in situation.clean:
+            by_kind[change.kind].append(change.id)
+        for c in situation.conflicts:  # the answers
+            choice = decided.get(c.id)
+            if choice == "theirs":
+                by_kind["update"].append(c.id)
+            elif c.kind == "deleted-there-modified-here" and choice == "delete":
+                by_kind["delete"].append(c.id)
+            elif c.kind == "deleted-here-modified-there" and choice == "keep":
+                by_kind["add"].append(c.id)
+        add, update, move, trash = by_kind["add"], by_kind["update"], by_kind["move"], by_kind["trash"]
+        purge, purge_groups = by_kind["delete"], by_kind["delete-group"]
+        groups_here = {g.id: g for g in vault.groups()}
+        paths = {theirs[i].path for i in add} | {mine[i].path for i in [*update, *move, *trash, *purge]} \
+            | {groups_here[g].path for g in purge_groups}
+        report = MergeReport(
+            source=source, added=len(add), updated=len(update), moved=len(move), trashed=len(trash), deleted=len(purge),
+            groups_deleted=len(purge_groups), unchanged=situation.unchanged, skipped=situation.skipped, entries=sorted(paths),
+            records_copied=situation.records_to_copy, changes=situation.clean, conflicts=situation.conflicts,
+            unresolved=len(open_conflicts))
+        if open_conflicts or not (paths or situation.records_to_copy):
+            return Plan(change=report)  # a conflict is open (nothing is written), or there is nothing to do
+        records = _records_of(other)
         other_groups = {g.id: g for g in other.groups()}
-        add_ids = [s.id for s in add]
-        update_ids = [(s.id, m.id) for s, m in update]
-        move_ids = [(s.id, m.id) for s, m in move]
-        trash_ids = [m.id for m in trash]
 
         def content(s: EntryData) -> dict[str, bytes]:
             return {name: other.attachment(s.id, name) for name, _ in s.attachments}
 
         def mutate(v: Vault) -> None:
-            for _s, m in update_ids:
-                v.snapshot_history(m)
-            for s, m in update_ids:
-                v.overwrite_entry(m, src_by[s], content(src_by[s]), keep_mtime=True)
-            for s, m in move_ids:
-                v.move_entry(m, _group_like(v, other_groups, src_by[s].group_id))
-            for m in trash_ids:
-                v.trash_entry(m)
-            for s in add_ids:
-                v.add_entry(_group_like(v, other_groups, src_by[s].group_id), src_by[s], content(src_by[s]),
+            for uid in update:
+                v.snapshot_history(uid)
+            for uid in update:
+                v.overwrite_entry(uid, theirs[uid], content(theirs[uid]), keep_mtime=True)
+            for uid in move:
+                v.move_entry(uid, _group_like(v, other_groups, theirs[uid].group_id))
+            for uid in trash:
+                v.trash_entry(uid)
+            for uid in add:
+                v.add_entry(_group_like(v, other_groups, theirs[uid].group_id), theirs[uid], content(theirs[uid]),
                             keep_id=True, keep_times=True)
+            for uid in purge:
+                v.purge_entry(uid)
+            for gid in purge_groups:
+                v.purge_group(gid)
+            v.record_deleted(records)  # the other copy's records join this vault's, each with the earlier time
 
         def verify(again: Vault) -> list[str]:
             got = {e.id: e for e in again.entries()}
             problems = []
-            for s in add_ids:
-                if s not in got or _state(got[s]) != _state(src_by[s]):
+            for uid in add:
+                if uid not in got or _state(got[uid]) != _state(theirs[uid]):
                     problems.append("an added entry is missing or differs")
-            for s, m in update_ids:
-                if m not in got or _state(got[m]) != _state(src_by[s]):
+            for uid in update:
+                if uid not in got or _state(got[uid]) != _state(theirs[uid]):
                     problems.append("an updated entry does not match the other copy")
-            for s, m in move_ids:
-                if m not in got or got[m].group_id != src_by[s].group_id:
+            for uid in move:
+                if uid not in got or got[uid].group_id != theirs[uid].group_id:
                     problems.append("a moved entry is not where the other copy has it")
+            if any(uid in got for uid in purge):
+                problems.append("an entry that should be deleted is still there")
+            if {g.id for g in again.groups()} & set(purge_groups):
+                problems.append("a group that should be deleted is still there")
+            if not set(records) <= again.deleted_ids():
+                problems.append("a deletion record of the other copy is missing")
             return problems
 
-        return Plan(change=report, mutate=mutate, touched=touched, count_delta=len(add), verify=verify,
+        return Plan(change=report, mutate=mutate, touched=set(update) | set(move) | set(trash) | set(purge),
+                    count_delta=len(add) - len(purge), verify=verify,
                     stamp="none")  # the entries keep the times of the copy they come from
 
     return execute_vault(open_db, db, build, apply)

@@ -232,7 +232,7 @@ class ImportReport(Frozen):
 
 class MergeReport(Frozen):
     source: str
-    added: int  # entries only the other copy has
+    added: int  # entries only the other copy has (and the ones a person asked to be brought back)
     updated: int  # entries whose newer state came from the other copy
     moved: int
     trashed: int  # moved to the recycle bin because the other copy has them there
@@ -240,6 +240,12 @@ class MergeReport(Frozen):
     skipped: int  # in the other copy's bin or deleted here: not brought back
     entries: list[str] = Field(default_factory=list)  # paths of the entries that change
     applied: bool = False
+    deleted: int = 0  # entries removed for good because the other copy's record says they were deleted
+    groups_deleted: int = 0
+    records_copied: int = 0  # deletion records the other copy had and this vault lacked
+    changes: list["MergeChange"] = Field(default_factory=list)  # what is done by itself
+    conflicts: list["MergeConflict"] = Field(default_factory=list)  # what a person decides
+    unresolved: int = 0  # conflicts without an answer: while there are any, nothing is written
 
 
 MergeChangeKind = Literal["add", "update", "move", "trash", "delete", "delete-group"]
@@ -277,6 +283,9 @@ class MergeSituation(Frozen):
     skipped: int = 0  # not brought back: in the other copy's bin, or deleted here and not changed since
     groups_kept: int = 0  # a deleted group that still holds something stays
     records_to_copy: int = 0  # deletion records this vault lacks (or has with a later time)
+
+
+MergeReport.model_rebuild()  # (it names MergeChange and MergeConflict, which come after it)
 
 
 class Generated(Frozen):

@@ -125,18 +125,37 @@ def merge(
     ctx: typer.Context, other: Annotated[Path, typer.Argument(help="The other copy of this vault.")],
     fmt: c.Fmt = Format.text, apply: c.Apply = False,
     keyfile: OtherKeyfile = None,
+    resolve: Annotated[Optional[list[str]], typer.Option(
+        "--resolve", help="Answer one conflict: ID=mine|theirs (changed in both copies) or ID=keep|delete (deleted in one copy, "
+                          "changed in the other). The id is shown with the conflict. Repeatable.")] = None,
+    prefer: Annotated[Optional[str], typer.Option(
+        "--prefer", help="Answer every conflict that --resolve does not: `mine` keeps this vault's side, `theirs` takes the other "
+                         "copy's. Never the default: without it a conflict stays open.")] = None,
 ) -> None:
-    """Merge another copy of this vault (a sync conflict): by UUID and modification time, nothing is deleted.
+    """Merge another copy of this vault (a sync conflict), the way git does: what loses nothing is done by itself (entries only
+    there, newer states, moves, bin moves, and deletions the other copy recorded for entries unchanged since). Where a change
+    would be dropped, the entry is a conflict and you decide with --resolve or --prefer. While any conflict is open nothing is
+    written, and the exit code is 1. A dry run unless --apply; a deletion removes the entry for good.
     Without a password for the other copy, this vault's own credentials are tried."""
+    if prefer not in (None, "mine", "theirs"):
+        c.fail("--prefer is mine or theirs", 2)
+    answers: dict[str, str] = {}
+    for item in resolve or []:
+        uid, sep, choice = item.partition("=")
+        if not sep or not uid or not choice:
+            c.fail(f"--resolve needs ID=ANSWER, got {item!r}", 2)
+        answers[uid] = choice
     db, opener = _vault(ctx)
     local = opener()
 
     result_opener = _other(other, keyfile, fallback=lambda: (local.password, local.keyfile))
     try:
-        result = transfer_mod.merge_vaults(opener, db, result_opener, str(other), apply)
+        result = transfer_mod.merge_vaults(opener, db, result_opener, str(other), apply, answers, prefer)
     except write_mod.WriteError as exc:
         _refused(exc)
     c.emit(result, fmt)
+    if result.unresolved:
+        raise typer.Exit(1)  # decisions are needed: nothing was written
 
 
 @app.command("export-attachment")
