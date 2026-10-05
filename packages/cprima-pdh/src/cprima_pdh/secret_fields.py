@@ -16,7 +16,7 @@ from typing import Callable
 from . import boundary
 from cprima_pdh_kdbxkit.kdbx_format import STANDARD_PROTECTED
 from .generate import PasswordSettings, generate_password
-from .models import OrgChange
+from .models import FillItem, OrgChange
 from .schema import SchemaSet, _effective_protected, lookup_term, resolve, vocabulary_index
 from .txn import Plan, execute_vault
 from .validation import typing_of
@@ -114,6 +114,27 @@ def fill_targets(source, path: str, sset: SchemaSet, username: str | None = None
         if lacking:
             out.append(Target(e, lacking))
     return out
+
+
+def collect(pairs: list[tuple[Target, SecretField]], generate: bool, settings: PasswordSettings | None,
+            ask: Callable[[Target, SecretField], str] | None) -> tuple[dict[str, dict[str, str]], list[FillItem]]:
+    """Decide, field by field, where the value comes from: generated (when asked for and the taxonomy allows it), else `ask`
+    (a hidden prompt on a terminal; an empty answer skips), else skipped because nothing can be asked. Returns the values by
+    entry id, ready for `fill_entries`, and what was done to each field. No value is in the items."""
+    values: dict[str, dict[str, str]] = {}
+    items: list[FillItem] = []
+    for target, field in pairs:
+        if generate and field.generatable:
+            value, how = generated(settings), "generated"
+        elif ask is not None:
+            value = ask(target, field)
+            how = "typed" if value else "skipped"
+        else:
+            value, how = "", "skipped"
+        if value:
+            values.setdefault(target.entry.id, {})[field.name] = value
+        items.append(FillItem(entry=target.entry.path, field=field.name, how=how))
+    return values, items
 
 
 def fill_entries(open_db: Callable[[], object], db: Path, values: Mapping[str, Mapping[str, str]], apply: bool,

@@ -149,3 +149,21 @@ def apply_link(
         lambda vault: _link_value(vault, account, target, plain, account_username, target_username),
         overwrite, False, account_username,
     )
+
+
+def set_field(open_db: Callable[[], object], db: Path, path: str, field: str, value: str, overwrite: bool, protect: bool,
+              username: str | None = None, unprotect: bool = False, literal: bool = False, sset=None,
+              apply: bool = False) -> Change:
+    """Set one field on one entry, like every other write: a dry run unless `apply`."""
+    if apply:
+        return apply_set(open_db, db, path, field, value, overwrite, protect, username, unprotect, literal, sset)
+    return plan_set(open_db(), path, field, value, overwrite, protect, username, unprotect, literal, sset)
+
+
+def link_entries(open_db: Callable[[], object], db: Path, account: str, target: str, field: str = "device",
+                 plain: bool = False, overwrite: bool = False, account_username: str | None = None,
+                 target_username: str | None = None, apply: bool = False) -> Change:
+    """Link one entry to another, like every other write: a dry run unless `apply`."""
+    if apply:
+        return apply_link(open_db, db, account, target, field, plain, overwrite, account_username, target_username)
+    return plan_link(open_db(), account, target, field, plain, overwrite, account_username, target_username)

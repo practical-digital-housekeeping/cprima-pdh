@@ -87,6 +87,14 @@ def from_plugin_fields(custom: dict[str, str]) -> Params | None:
                   algorithm=found["algorithm"])
 
 
+def params_of(entry) -> Params | None:
+    """The one-time-password parameters of an entry snapshot: its `otp` value, else the KeePass 2 plugin's fields; None when
+    it has neither. Raises ValueError for an `otp` value that cannot be read."""
+    if entry.otp:
+        return parse(entry.otp)
+    return from_plugin_fields({k: f.value for k, f in entry.fields.items()})
+
+
 def code(params: Params, at: float | None = None) -> OtpCode:
     """The code for `at` (seconds since the epoch; now by default). A counter-based code ignores the time."""
     now = time.time() if at is None else at

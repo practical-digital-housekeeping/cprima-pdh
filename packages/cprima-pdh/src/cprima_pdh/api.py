@@ -188,7 +188,7 @@ class Vault:
         """The current one-time password of an account: the code and its seconds left, never the seed."""
         e = self._entry(account)
         try:
-            params = otp_mod.parse(e.otp) if e.otp else otp_mod.from_plugin_fields({k: f.value for k, f in e.fields.items()})
+            params = otp_mod.params_of(e)
         except ValueError as exc:
             raise SecretNotSet(f"{e.path!r}: {exc}") from None
         if params is None:
@@ -221,14 +221,9 @@ class Vault:
             targets = secret_fields.fill_targets(self._live(), path, self._sset)
         except WriteError as exc:
             raise NoSuchAccount(str(exc)) from None
-        values: dict[str, dict[str, str]] = {}
-        left: list[tuple[str, str]] = []
-        for t in targets:
-            for f in t.fields:
-                if f.generatable:
-                    values.setdefault(t.entry.id, {})[f.name] = secret_fields.generated(settings)
-                else:
-                    left.append((t.entry.path, f.name))
+        pairs = [(t, f) for t in targets for f in t.fields]
+        values, items = secret_fields.collect(pairs, True, settings, None)  # nobody to ask: what cannot be generated is left
+        left = [(i.entry, i.field) for i in items if i.how == "skipped"]
         if values:
             try:
                 secret_fields.fill_entries(self._reopen, self._path, values, True, self._sset)

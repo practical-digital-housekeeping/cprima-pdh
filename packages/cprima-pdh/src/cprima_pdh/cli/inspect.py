@@ -139,12 +139,8 @@ def otp_code(ctx: typer.Context, path: Annotated[str, typer.Argument(help="Entry
         e = as_vault(_kp(ctx)).find_entry(path, username)
     except LookupError as exc:  # no such entry, or several: say so
         c.fail(f"not found: {exc.args[0] if exc.args else exc}", 1)
-    params = None
     try:
-        if e.otp:
-            params = otp_mod.parse(e.otp)
-        else:
-            params = otp_mod.from_plugin_fields({k: f.value for k, f in e.fields.items()})
+        params = otp_mod.params_of(e)
     except ValueError as exc:
         c.fail(f"{path}: {exc}", 1)
     if params is None:

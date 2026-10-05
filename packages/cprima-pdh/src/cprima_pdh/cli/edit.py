@@ -59,10 +59,8 @@ def set_field(
     sset = c.load_taxonomy(c.state(ctx))
     db, opener = _vault(ctx)
     try:
-        if apply:
-            change = write_mod.apply_set(opener, db, path, field, value, overwrite, protect, username, unprotect, literal, sset)
-        else:
-            change = write_mod.plan_set(opener(), path, field, value, overwrite, protect, username, unprotect, literal, sset)
+        change = write_mod.set_field(opener, db, path, field, value, overwrite, protect, username, unprotect, literal, sset,
+                                     apply)
     except write_mod.WriteError as exc:
         _refused(exc)
     c.emit(change, fmt)
@@ -86,12 +84,8 @@ def link(
     """Link an entry to another one by UUID (a KeePass reference)."""
     db, opener = _vault(ctx)
     try:
-        if apply:
-            change = write_mod.apply_link(opener, db, account, target, field, plain, overwrite,
-                                          account_username, target_username)
-        else:
-            change = write_mod.plan_link(opener(), account, target, field, plain, overwrite,
-                                         account_username, target_username)
+        change = write_mod.link_entries(opener, db, account, target, field, plain, overwrite, account_username,
+                                        target_username, apply)
     except write_mod.WriteError as exc:
         _refused(exc)
     c.emit(change, fmt)
@@ -506,20 +500,9 @@ def fill(
     console = c._has_console()
     if not console and not (generate and any(f.generatable for _, f in pairs)):
         c.fail("write refused: there is no terminal to ask on; --generate fills the fields that may be generated", 2)
-    values: dict[str, dict[str, str]] = {}
-    items: list[FillItem] = []
-    for t, f in pairs:
-        if generate and f.generatable:
-            value, how = secret_fields_mod.generated(settings), "generated"
-        elif console:
-            value = typer.prompt(f"{t.entry.path}: {f.name} (Enter to skip)", hide_input=True, default="", show_default=False,
-                                 err=True)
-            how = "typed" if value else "skipped"
-        else:
-            value, how = "", "skipped"
-        if value:
-            values.setdefault(t.entry.id, {})[f.name] = value
-        items.append(FillItem(entry=t.entry.path, field=f.name, how=how))
+    ask = (lambda t, f: typer.prompt(f"{t.entry.path}: {f.name} (Enter to skip)", hide_input=True, default="",
+                                     show_default=False, err=True)) if console else None
+    values, items = secret_fields_mod.collect(pairs, generate, settings, ask)
     applied = False
     if values:
         try:
