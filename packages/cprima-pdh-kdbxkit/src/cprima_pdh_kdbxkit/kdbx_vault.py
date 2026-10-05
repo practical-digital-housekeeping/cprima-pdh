@@ -2,7 +2,7 @@
 
 This is the one place that knows pykeepass' objects and the KDBX XML, and the one place every workaround for pykeepass'
 gaps lives:
-- the KDBX 3.x header hash that pykeepass never updates (`save` / `file_problems`, via `source.save_vault`);
+- the KDBX 3.x header hash that pykeepass never updates (`save` / `file_problems`, via `save_vault`);
 - time stamps that pykeepass' setters do not set (`stamp`);
 - History snapshots before an edit (`snapshot_history`);
 - a one-time-password secret that cannot be set to nothing (`set_field` on `otp`);
@@ -22,7 +22,7 @@ import uuid as uuidlib
 from datetime import datetime, timezone
 from pathlib import Path
 
-from ..vault import STANDARD, EntryData, Field, GroupData, VaultBase, VaultInfo, register_adapter, resolve_entry
+from cprima_pdh_vault.vault import STANDARD, EntryData, Field, GroupData, VaultBase, VaultInfo, register_adapter, resolve_entry
 from .kdbx_format import STANDARD_ATTR, kdf_name
 
 # KDBX versions whose writing has been verified against genuine KeePassXC files (3.1, 4.0 and 4.1 templates); anything else

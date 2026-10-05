@@ -12,7 +12,7 @@ from typer.testing import CliRunner
 from cprima_pdh import doctor
 from cprima_pdh.cli import _common, app
 from cprima_pdh.schema import parse_schemas
-from cprima_pdh.source import pykeepass_open
+from cprima_pdh_kdbxkit.kdbx_vault import pykeepass_open
 
 TAXONOMY = parse_schemas("""
 [area."Shopping"]

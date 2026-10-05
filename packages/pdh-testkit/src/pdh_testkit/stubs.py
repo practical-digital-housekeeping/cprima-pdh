@@ -79,7 +79,7 @@ class StubEntry:
 
     def snapshot(self, in_bin: bool = False):
         """This stub as the engine's EntryData (what a backend's `entries()` would hand out)."""
-        from cprima_pdh.vault import STANDARD, EntryData, Field
+        from cprima_pdh_vault.vault import STANDARD, EntryData, Field
 
         return EntryData(
             id=str(self.uuid), group_path="/".join(self.group.path) or "/", title=self.title or "",
@@ -98,8 +98,8 @@ class StubKP:
         self.groups = list({id(e.group): e.group for e in entries}.values())
 
     def __vault__(self):
-        """The Vault view of this fake (see `cprima_pdh.vault.as_vault`)."""
-        from cprima_pdh.backends.memory import MemoryVault
+        """The Vault view of this fake (see `cprima_pdh_vault.vault.as_vault`)."""
+        from cprima_pdh_vault.memory import MemoryVault
 
         bin_uuid = self.recyclebin_group.uuid if self.recyclebin_group is not None else None
 

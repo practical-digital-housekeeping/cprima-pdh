@@ -16,7 +16,7 @@ from .. import organize as organize_mod
 from .. import write as write_mod
 from ..models import FillItem, FillReport
 from ..render import Format
-from ..vault import as_vault
+from cprima_pdh_vault.vault import as_vault
 from .. import generate as generate_mod
 from . import _common as c
 from . import _generator as g

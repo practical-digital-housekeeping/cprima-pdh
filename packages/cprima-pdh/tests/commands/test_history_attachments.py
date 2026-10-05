@@ -8,7 +8,7 @@ from pdh_testkit.mess import messy_vault
 from typer.testing import CliRunner
 
 from cprima_pdh.cli import app
-from cprima_pdh.source import pykeepass_open
+from cprima_pdh_kdbxkit.kdbx_vault import pykeepass_open
 from pdh_testkit.cli import invoke
 
 pytestmark = pytest.mark.usefixtures("opens_with_the_test_password")

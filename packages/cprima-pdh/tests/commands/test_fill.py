@@ -8,7 +8,7 @@ from pdh_testkit.cli import invoke
 
 from cprima_pdh import profiles
 from cprima_pdh.cli import _common
-from cprima_pdh.source import pykeepass_open
+from cprima_pdh_kdbxkit.kdbx_vault import pykeepass_open
 
 pytestmark = pytest.mark.usefixtures("opens_with_the_test_password")
 

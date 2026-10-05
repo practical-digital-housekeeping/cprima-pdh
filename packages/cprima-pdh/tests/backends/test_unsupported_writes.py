@@ -8,10 +8,10 @@ from pdh_testkit.memory import memory_vault
 from pdh_testkit.sopsfix import load_sops
 from pydantic import BaseModel
 
-from cprima_pdh.backends import age
-from cprima_pdh.backends.sops import SopsVault
+from cprima_pdh_sopskit import age
+from cprima_pdh_sopskit.sops_vault import SopsVault
 from cprima_pdh.txn import Plan, execute_vault
-from cprima_pdh.vault import WRITE_OPERATIONS, Unsupported
+from cprima_pdh_vault.vault import WRITE_OPERATIONS, Unsupported
 from cprima_pdh.write import WriteError
 
 FIX = load_sops("sops-json-basic")

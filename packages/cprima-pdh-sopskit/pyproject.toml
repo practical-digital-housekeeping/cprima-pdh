@@ -1,0 +1,20 @@
+[project]
+name = "cprima-pdh-sopskit"
+version = "0.0.0"
+description = "sops files encrypted to age recipients, read as a vault, for cprima-pdh. Read-only. No taxonomy."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [{ name = "Christian Prior-Mamulyan" }]
+dependencies = ["cprima-pdh-vault", "cryptography>=42"]
+
+[tool.uv.sources]
+cprima-pdh-vault = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/cprima_pdh_sopskit"]

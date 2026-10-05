@@ -9,11 +9,17 @@ resolution-markers = [
 [manifest]
 members = [
     "cprima-pdh",
+    "cprima-pdh-kdbxkit",
+    "cprima-pdh-sopskit",
+    "cprima-pdh-vault",
     "pdh-testkit",
 ]
 
 [manifest.dependency-groups]
 dev = [
+    { name = "cprima-pdh-kdbxkit", editable = "packages/cprima-pdh-kdbxkit" },
+    { name = "cprima-pdh-sopskit", editable = "packages/cprima-pdh-sopskit" },
+    { name = "cprima-pdh-vault", editable = "packages/cprima-pdh-vault" },
     { name = "pdh-testkit", editable = "packages/pdh-testkit" },
     { name = "pytest", specifier = ">=8" },
     { name = "pytest-xdist", specifier = ">=3" },
@@ -244,6 +250,43 @@ requires-dist = [
     { name = "typer", specifier = ">=0.12" },
 ]
 provides-extras = ["kdbx", "sops", "all"]
+
+[[package]]
+name = "cprima-pdh-kdbxkit"
+version = "0.0.0"
+source = { editable = "packages/cprima-pdh-kdbxkit" }
+dependencies = [
+    { name = "cprima-pdh-vault" },
+    { name = "lxml" },
+    { name = "pykeepass" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "cprima-pdh-vault", editable = "packages/cprima-pdh-vault" },
+    { name = "lxml" },
+    { name = "pykeepass", specifier = ">=4.1" },
+]
+
+[[package]]
+name = "cprima-pdh-sopskit"
+version = "0.0.0"
+source = { editable = "packages/cprima-pdh-sopskit" }
+dependencies = [
+    { name = "cprima-pdh-vault" },
+    { name = "cryptography" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "cprima-pdh-vault", editable = "packages/cprima-pdh-vault" },
+    { name = "cryptography", specifier = ">=42" },
+]
+
+[[package]]
+name = "cprima-pdh-vault"
+version = "0.0.0"
+source = { editable = "packages/cprima-pdh-vault" }
 
 [[package]]
 name = "cryptography"

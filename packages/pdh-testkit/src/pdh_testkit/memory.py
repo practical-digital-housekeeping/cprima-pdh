@@ -5,8 +5,8 @@ import uuid
 from collections.abc import Sequence
 from datetime import timezone
 
-from cprima_pdh.backends.memory import MemoryVault
-from cprima_pdh.vault import EntryData, Field
+from cprima_pdh_vault.memory import MemoryVault
+from cprima_pdh_vault.vault import EntryData, Field
 
 from .vault import Entry
 

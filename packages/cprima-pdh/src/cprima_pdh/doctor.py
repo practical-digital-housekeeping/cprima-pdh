@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Callable
 
 from . import __version__, backends, session
-from .backends.kdbx_format import OTP_PREFIXES
+from cprima_pdh_kdbxkit.kdbx_format import OTP_PREFIXES
 from .models import DoctorCheck, DoctorReport
 from .write import _lock_files
 
@@ -215,7 +215,7 @@ def diagnose(db: Path | None, taxonomy: Callable[[], object], taxonomy_source: s
         r.add("file", "contents", "skip", "session not usable for this vault")
         return r.done()
 
-    from .vault import as_vault
+    from cprima_pdh_vault.vault import as_vault
 
     vault = as_vault(kp)
     live = _file_contents(r, vault)
@@ -300,7 +300,7 @@ def _pct(n: int, total: int) -> str:
 
 
 def _method(r: _Report, vault, sset, live: list) -> None:
-    from .backends.memory import MemoryVault
+    from cprima_pdh_vault.memory import MemoryVault
     from .conform import conformance
     from .schema import lookup_term, validate, vocabulary_index
     from .validation import links_for, typing_of

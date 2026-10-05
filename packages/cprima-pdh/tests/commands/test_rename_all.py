@@ -73,7 +73,7 @@ def vault(tmp_path):
 
 @pytest.fixture(autouse=True)
 def opens_with_the_test_password(monkeypatch):
-    from cprima_pdh.source import pykeepass_open
+    from cprima_pdh_kdbxkit.kdbx_vault import pykeepass_open
 
     monkeypatch.setattr(_common, "open_db", lambda db, _key: pykeepass_open(db, DEFAULT_PASSWORD, None))
 

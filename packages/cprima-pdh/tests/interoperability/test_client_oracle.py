@@ -16,7 +16,7 @@ from typer.testing import CliRunner
 
 from cprima_pdh import otp
 from cprima_pdh.cli import _common, app
-from cprima_pdh.source import pykeepass_open
+from cprima_pdh_kdbxkit.kdbx_vault import pykeepass_open
 
 KPX = shutil.which("keepassxc-cli") or r"C:\Program Files\KeePassXC\keepassxc-cli.exe"
 pytestmark = [pytest.mark.interoperability,

@@ -128,13 +128,13 @@ def open_vault(st: AppState, db: Path, key: Path | None):
     """The vault as the engine sees it, through the backend selected for it (a KDBX file through the kdbx backend, a sops
     file through the sops backend). For a sops file `key` is the age identity file (else SOPS_AGE_KEY /
     SOPS_AGE_KEY_FILE, as with sops itself)."""
-    from ..vault import as_vault
+    from cprima_pdh_vault.vault import as_vault
 
     if select_backend(st, db).name == "sops":
         require_backend("sops")
-        from ..backends import age
-        from ..backends.sops import SopsVault, default_identities
-        from ..backends.sops_format import SopsError
+        from cprima_pdh_sopskit import age
+        from cprima_pdh_sopskit.sops_vault import SopsVault, default_identities
+        from cprima_pdh_sopskit.sops_format import SopsError
 
         try:
             return SopsVault.open(db, age.load_identities(key) if key else default_identities())

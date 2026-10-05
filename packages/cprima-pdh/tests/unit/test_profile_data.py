@@ -13,7 +13,8 @@ from pdh_testkit.paths import TAXONOMY
 from pdh_testkit.stubs import E, StubKP
 
 from cprima_pdh import profiles
-from cprima_pdh.backends import kdbx, kdbx_format
+from cprima_pdh.backends import kdbx
+from cprima_pdh_kdbxkit import kdbx_format
 from cprima_pdh.schema import SchemaError, parse_schemas, validate
 
 SSET = profiles.load(profiles.DEFAULT)

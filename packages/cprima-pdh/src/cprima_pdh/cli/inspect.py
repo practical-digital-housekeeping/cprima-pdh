@@ -36,7 +36,7 @@ def _kp(ctx: typer.Context):
 
 def _kdbx(ctx: typer.Context, capability: str):
     """The KeePass database behind the vault, for what the engine cannot yet do on snapshots; refuses other backends."""
-    from ..vault import Unsupported, require
+    from cprima_pdh_vault.vault import Unsupported, require
 
     vault = _kp(ctx)
     try:
@@ -133,7 +133,7 @@ def otp_code(ctx: typer.Context, path: Annotated[str, typer.Argument(help="Entry
              username: Annotated[Optional[str], typer.Option("--username", help="Pick among entries sharing the path.")] = None) -> None:
     """The current one-time password of an entry: the code and its remaining seconds, never the secret."""
     from .. import otp as otp_mod
-    from ..vault import as_vault
+    from cprima_pdh_vault.vault import as_vault
 
     try:
         e = as_vault(_kp(ctx)).find_entry(path, username)

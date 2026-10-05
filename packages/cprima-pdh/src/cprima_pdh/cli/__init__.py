@@ -113,8 +113,8 @@ def doctor(ctx: typer.Context, fmt: c.Fmt = Format.text) -> None:
         except backends.BackendMissing:
             return None  # the report names the problem (setup / backend)
         if kind == "sops":  # an age identity instead of a password; errors reach the report
-            from ..backends import age
-            from ..backends.sops import SopsVault, default_identities
+            from cprima_pdh_sopskit import age
+            from cprima_pdh_sopskit.sops_vault import SopsVault, default_identities
 
             return SopsVault.open(db, age.load_identities(st.key) if st.key else default_identities())
         # only with a sidecar password or a session: doctor never prompts

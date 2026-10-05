@@ -18,7 +18,7 @@ from cprima_pdh.api import (
 )
 from cprima_pdh.credentials import KEYFILE_ENV, PASSWORD_ENV, Credentials, from_environment
 from cprima_pdh.generate import PasswordSettings
-from cprima_pdh.source import pykeepass_open
+from cprima_pdh_kdbxkit.kdbx_vault import pykeepass_open
 
 BINDING = profiles.load(profiles.DEFAULT).binding.field
 SEED = "JBSWY3DPEHPK3PXP"

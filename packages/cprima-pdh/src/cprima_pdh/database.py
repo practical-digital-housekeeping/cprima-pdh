@@ -9,7 +9,7 @@ from typing import Callable
 
 from .models import DbBin, DbKdf, DbSettings, OrgChange
 from .txn import Plan, execute_vault
-from .vault import Vault, require
+from cprima_pdh_vault.vault import Vault, require
 from .write import WriteError
 
 MIN_ITERATIONS, MIN_MEMORY_KIB, MIN_PARALLELISM = 1, 8 * 1024, 1  # below this a key derivation protects too little
@@ -17,7 +17,7 @@ MIN_ITERATIONS, MIN_MEMORY_KIB, MIN_PARALLELISM = 1, 8 * 1024, 1  # below this a
 
 def create_vault(path: Path, password: str, keyfile: Path | None, apply: bool) -> OrgChange:
     """Create a new, empty KDBX 4 vault; the file must not exist yet. KeePass' default key derivation applies."""
-    from .backends.kdbx_vault import KdbxVault
+    from cprima_pdh_kdbxkit.kdbx_vault import KdbxVault
 
     if path.exists():
         raise WriteError(f"{path} exists; pdh never overwrites a vault")

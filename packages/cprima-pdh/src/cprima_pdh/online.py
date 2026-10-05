@@ -17,7 +17,7 @@ from urllib.parse import quote, urlparse
 from . import net
 from .conform import _issue
 from .models import LEVEL_ORDER, AccountHit, BreachHit, BreachReport, KnownPassword, KnownPasswordsReport, RuleFinding
-from .vault import as_vault
+from cprima_pdh_vault.vault import as_vault
 
 RANGE_URL = "https://api.pwnedpasswords.com/range/"
 CATALOGUE_URL = "https://haveibeenpwned.com/api/v3/breaches"

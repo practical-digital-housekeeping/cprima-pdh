@@ -14,13 +14,13 @@ from pathlib import Path
 from typing import Callable
 
 from . import boundary
-from .backends.kdbx_format import STANDARD_PROTECTED
+from cprima_pdh_kdbxkit.kdbx_format import STANDARD_PROTECTED
 from .generate import PasswordSettings, generate_password
 from .models import OrgChange
 from .schema import SchemaSet, _effective_protected, lookup_term, resolve, vocabulary_index
 from .txn import Plan, execute_vault
 from .validation import typing_of
-from .vault import STANDARD, EntryData, Vault, as_vault
+from cprima_pdh_vault.vault import STANDARD, EntryData, Vault, as_vault
 from .write import WriteError, find_data
 
 

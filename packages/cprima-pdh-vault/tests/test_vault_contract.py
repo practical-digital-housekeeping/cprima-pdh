@@ -12,9 +12,9 @@ from pdh_testkit import DEFAULT_PASSWORD, Entry, synthetic_vault
 from pdh_testkit.memory import memory_vault
 from pdh_testkit.mess import messy_vault
 
-from cprima_pdh.backends.kdbx_vault import KdbxVault
-from cprima_pdh.source import pykeepass_open
-from cprima_pdh.vault import STANDARD, EntryData, Field, GroupData, VaultInfo, as_vault, require, Unsupported
+from cprima_pdh_kdbxkit.kdbx_vault import KdbxVault
+from cprima_pdh_kdbxkit.kdbx_vault import pykeepass_open
+from cprima_pdh_vault.vault import STANDARD, EntryData, Field, GroupData, VaultInfo, as_vault, require, Unsupported
 
 SPEC = [
     Entry("login", group="Money/Cards", username="alex", password="pw-1", url="https://example.org", notes="n",
@@ -122,7 +122,7 @@ def test_as_vault_accepts_a_vault_and_wraps_a_pykeepass_object(tmp_path):
 
 
 def test_the_standard_names_are_the_profiles():
-    from cprima_pdh.backends.kdbx_format import STANDARD_ATTR
+    from cprima_pdh_kdbxkit.kdbx_format import STANDARD_ATTR
 
     assert set(STANDARD) == set(STANDARD_ATTR)
 
@@ -138,8 +138,8 @@ def any_vault(request, tmp_path):
         return KdbxVault(pykeepass_open(path, DEFAULT_PASSWORD, None), path)
     from pdh_testkit.sopsfix import load_sops
 
-    from cprima_pdh.backends import age
-    from cprima_pdh.backends.sops import SopsVault
+    from cprima_pdh_sopskit import age
+    from cprima_pdh_sopskit.sops_vault import SopsVault
 
     fix = load_sops("sops-json-basic")
     return SopsVault.open(fix.path, age.identities_from_text(fix.identity_text))

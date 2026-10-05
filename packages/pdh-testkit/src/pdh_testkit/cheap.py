@@ -24,7 +24,7 @@ _prototypes: dict[str, bytes] = {}
 
 def _lowered(name: str) -> bytes:
     """The template's bytes with the cost of its key derivation lowered."""
-    from cprima_pdh.source import pykeepass_open, save_vault
+    from cprima_pdh_kdbxkit.kdbx_vault import pykeepass_open, save_vault
 
     template = vaults.load(name)
     scratch = Path(tempfile.mkdtemp(prefix="pdh-cheap-")) / "p.kdbx"

@@ -10,7 +10,7 @@ import io
 from pathlib import Path
 
 from .models import FileWritten
-from .vault import as_vault, require
+from cprima_pdh_vault.vault import as_vault, require
 from .write import WriteError, find_data
 
 

@@ -41,5 +41,13 @@ Issues = "https://github.com/practical-digital-housekeeping/cprima-pdh/issues"
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+# The vault layers are separate packages in this repository (../cprima-pdh-vault, -kdbxkit, -sopskit) and are bundled into this
+# wheel for now: nothing else is published. A build goes sdist first, then wheel from the sdist; the sdist carries the sibling
+# sources under src/. (A wheel built directly from the tree, `uv build --wheel`, would leave them out: do not release that.)
 [tool.hatch.build.targets.wheel]
-packages = ["src/cprima_pdh"]
+packages = ["src/cprima_pdh", "src/cprima_pdh_vault", "src/cprima_pdh_kdbxkit", "src/cprima_pdh_sopskit"]
+
+[tool.hatch.build.targets.sdist.force-include]
+"../cprima-pdh-vault/src/cprima_pdh_vault" = "src/cprima_pdh_vault"
+"../cprima-pdh-kdbxkit/src/cprima_pdh_kdbxkit" = "src/cprima_pdh_kdbxkit"
+"../cprima-pdh-sopskit/src/cprima_pdh_sopskit" = "src/cprima_pdh_sopskit"

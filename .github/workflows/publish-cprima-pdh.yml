@@ -40,6 +40,13 @@ jobs:
         # --out-dir: inside a workspace, `uv build` would write to the workspace root dist/
         run: uv build --out-dir dist
 
+      - name: The wheel carries the vault layers
+        # they are separate packages in this repository, bundled into the wheel through the sdist (see pyproject.toml)
+        run: >-
+          uv run --no-project python -c "import glob, zipfile; names = zipfile.ZipFile(glob.glob('dist/*.whl')[0]).namelist();
+          missing = [p for p in ('cprima_pdh_vault', 'cprima_pdh_kdbxkit', 'cprima_pdh_sopskit') if not any(n.startswith(p + '/') for n in names)];
+          assert not missing, missing"
+
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:

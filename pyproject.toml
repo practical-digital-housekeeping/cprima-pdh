@@ -4,13 +4,17 @@
 members = ["packages/*"]
 
 [dependency-groups]
-dev = ["pytest>=8", "pytest-xdist>=3", "pdh-testkit"]
+dev = ["pytest>=8", "pytest-xdist>=3", "pdh-testkit", "cprima-pdh-vault", "cprima-pdh-kdbxkit", "cprima-pdh-sopskit"]
 
 [tool.uv.sources]
 pdh-testkit = { workspace = true }
+cprima-pdh-vault = { workspace = true }
+cprima-pdh-kdbxkit = { workspace = true }
+cprima-pdh-sopskit = { workspace = true }
 
 [tool.pytest.ini_options]
-testpaths = ["packages/cprima-pdh/tests", "packages/pdh-testkit/tests"]
+testpaths = ["packages/cprima-pdh/tests", "packages/cprima-pdh-vault/tests", "packages/cprima-pdh-kdbxkit/tests",
+             "packages/cprima-pdh-sopskit/tests", "packages/pdh-testkit/tests"]
 addopts = "-m 'not compatibility and not interoperability' --strict-markers --durations=10"
 markers = [
     "compatibility: the same behaviour across every genuine template (all KDBX versions, ciphers, key derivations; about an hour); run with `just test-compatibility`",

@@ -12,7 +12,7 @@ from pdh_testkit.cheap import cheap_copy
 from typer.testing import CliRunner
 
 from cprima_pdh.cli import _common, app
-from cprima_pdh.source import header_end, pykeepass_open, save_vault, stored_header_hash_ok
+from cprima_pdh_kdbxkit.kdbx_vault import header_end, pykeepass_open, save_vault, stored_header_hash_ok
 
 T3 = vaults.load("template-kdbx3")
 
@@ -83,7 +83,7 @@ def test_a_new_master_password_keeps_the_hash_valid(work):
 
 def test_the_write_path_would_refuse_a_file_whose_hash_is_stale(work, monkeypatch):
     """The verification step catches it even if the fix is ever bypassed (pdh's reopen alone cannot see it)."""
-    import cprima_pdh.backends.kdbx_vault as backend
+    import cprima_pdh_kdbxkit.kdbx_vault as backend
     from cprima_pdh.write import WriteError
 
     monkeypatch.setattr(backend, "save_vault", lambda kp, path=None: kp.save(path))  # the unfixed save

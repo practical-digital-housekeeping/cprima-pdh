@@ -35,7 +35,7 @@ class Backend:
 
     @staticmethod
     def capabilities() -> frozenset[str]:
-        from .kdbx_vault import KdbxVault
+        from cprima_pdh_kdbxkit.kdbx_vault import KdbxVault
 
         return KdbxVault.capabilities
 

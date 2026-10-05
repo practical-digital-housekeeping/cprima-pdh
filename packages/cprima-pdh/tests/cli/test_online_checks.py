@@ -10,7 +10,7 @@ from pykeepass import PyKeePass
 
 from cprima_pdh import net
 from cprima_pdh.cli import _common
-from cprima_pdh.source import pykeepass_open
+from cprima_pdh_kdbxkit.kdbx_vault import pykeepass_open
 from pdh_testkit.cli import invoke
 
 

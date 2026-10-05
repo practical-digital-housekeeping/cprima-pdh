@@ -4,9 +4,9 @@ from __future__ import annotations
 from typing import Annotated
 
 import typer
+from cprima_pdh_kdbxkit.kdbx_vault import pykeepass_open
 
 from .. import session as session_mod
-from .. import source
 from ..models import SessionState
 from ..render import Format
 from . import _common as c
@@ -29,7 +29,7 @@ def unlock(
     c.require_backend("kdbx")
     password = c.prompt_password()
     try:
-        source.pykeepass_open(db, password, str(st.key) if st.key else None)  # verify first
+        pykeepass_open(db, password, str(st.key) if st.key else None)  # verify first
     except Exception as exc:
         c.fail(f"open failed: {exc}", 1)
     session_mod.save_session(db, password, st.key, minutes)

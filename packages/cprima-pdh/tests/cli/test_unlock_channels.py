@@ -10,7 +10,7 @@ from pdh_testkit import DEFAULT_PASSWORD, Entry, synthetic_vault
 from typer.testing import CliRunner
 
 from cprima_pdh.cli import app
-from cprima_pdh.source import pykeepass_open
+from cprima_pdh_kdbxkit.kdbx_vault import pykeepass_open
 
 WRONG = "not-the-passphrase-xyz"
 

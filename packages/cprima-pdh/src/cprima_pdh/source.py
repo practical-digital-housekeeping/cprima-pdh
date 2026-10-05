@@ -9,8 +9,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable
 
-from .backends.kdbx_format import OTP_STYLES, kdf_name
-from .backends.kdbx_vault import header_end, pykeepass_open, save_vault, stored_header_hash_ok  # (re-exported: the KDBX specifics live in the backend)  # noqa: F401
+from cprima_pdh_kdbxkit.kdbx_format import OTP_STYLES, kdf_name
+from cprima_pdh_kdbxkit.kdbx_vault import pykeepass_open
 from .models import (
     DbMeta,
     DuplicateStats,
@@ -112,7 +112,7 @@ def _totp_style_of(e) -> str | None:
 
 def records(source, match: Callable | None = None) -> list[EntryRecord]:
     """One secret-free record per entry; `match` is a filter over snapshots (`EntryData`)."""
-    from .vault import as_vault
+    from cprima_pdh_vault.vault import as_vault
 
     out = []
     for e in as_vault(source).entries():
@@ -127,7 +127,7 @@ def records(source, match: Callable | None = None) -> list[EntryRecord]:
 
 
 def detail(source, title: str, show_password: bool) -> EntryDetail | None:
-    from .vault import as_vault
+    from cprima_pdh_vault.vault import as_vault
 
     e = next((x for x in as_vault(source).entries() if x.title == title), None)
     if e is None:
@@ -161,7 +161,7 @@ def _len_bucket(n: int) -> str:
 
 
 def inventory(source, path: Path) -> Inventory:
-    from .vault import as_vault
+    from cprima_pdh_vault.vault import as_vault
 
     vault = as_vault(source)
     entries, groups, info = vault.entries(), vault.groups(), vault.info()

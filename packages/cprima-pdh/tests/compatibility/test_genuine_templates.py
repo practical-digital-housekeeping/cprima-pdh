@@ -14,7 +14,7 @@ from pdh_testkit.mess import messy_vault
 from typer.testing import CliRunner
 
 from cprima_pdh.cli import _common, app
-from cprima_pdh.source import pykeepass_open
+from cprima_pdh_kdbxkit.kdbx_vault import pykeepass_open
 
 pytestmark = pytest.mark.compatibility  # real key derivation on every open: minutes, so `just test-compatibility`, not the default run
 

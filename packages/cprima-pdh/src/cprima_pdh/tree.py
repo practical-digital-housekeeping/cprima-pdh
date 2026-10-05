@@ -8,7 +8,7 @@ from __future__ import annotations
 from .models import GroupNode, TreeEntry
 from .schema import SchemaSet
 from .validation import typing_of
-from .vault import as_vault
+from cprima_pdh_vault.vault import as_vault
 
 
 def _plural(n: int) -> str:

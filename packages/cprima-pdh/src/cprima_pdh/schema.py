@@ -35,7 +35,7 @@ from .models import (
     ValidationReport,
     ValidationSummary,
 )
-from .backends.kdbx_format import OTP_PREFIXES, STANDARD_ATTR
+from cprima_pdh_kdbxkit.kdbx_format import OTP_PREFIXES, STANDARD_ATTR
 
 DEFAULT_PROFILE = "pdh-default"  # the profile whose [level] and [standard] a taxonomy fragment inherits
 SCHEMA_PSEUDO = "schema-field"  # pseudo-schema name for findings about the binding field itself
@@ -617,27 +617,27 @@ def worst_level(report: ValidationReport) -> str | None:
 
 def validate(source, sset: SchemaSet) -> ValidationReport:
     from .validation import validate_entries
-    from .vault import as_vault
+    from cprima_pdh_vault.vault import as_vault
 
     return validate_entries(as_vault(source).entries(), sset)
 
 
 def read(source, sset: SchemaSet, only: str | None = None) -> ReadReport:
     from .validation import read_entries
-    from .vault import as_vault
+    from cprima_pdh_vault.vault import as_vault
 
     return read_entries(as_vault(source).entries(), sset, only)
 
 
 def links_report(source, sset: SchemaSet) -> LinksReport:
     from .validation import links_for
-    from .vault import as_vault
+    from cprima_pdh_vault.vault import as_vault
 
     return links_for(as_vault(source).entries(), sset)
 
 
 def unclassified(source, sset: SchemaSet, list_entries: bool = False) -> UnclassifiedReport:
     from .validation import unclassified_for
-    from .vault import as_vault
+    from cprima_pdh_vault.vault import as_vault
 
     return unclassified_for(as_vault(source).entries(), sset, list_entries)

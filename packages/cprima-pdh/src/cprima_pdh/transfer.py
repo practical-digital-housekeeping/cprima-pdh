@@ -15,7 +15,7 @@ from .history import _state
 from .models import ImportReport, MergeReport
 from .schema import SchemaSet
 from .txn import Plan, execute_vault
-from .vault import EntryData, Field, GroupData, Vault, as_vault
+from cprima_pdh_vault.vault import EntryData, Field, GroupData, Vault, as_vault
 from .write import WriteError
 
 _COLUMNS = {  # lower-cased CSV header -> what it is

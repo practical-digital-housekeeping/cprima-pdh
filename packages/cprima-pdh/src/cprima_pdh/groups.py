@@ -10,7 +10,7 @@ from typing import Callable
 from .models import OrgChange
 from .organize import _top, find_group
 from .txn import Plan, execute_vault
-from .vault import GroupData, Vault
+from cprima_pdh_vault.vault import GroupData, Vault
 from .write import WriteError
 
 _ICONS = range(0, 69)  # KeePass' standard icon set

@@ -11,7 +11,8 @@ from pykeepass import PyKeePass
 from typer.testing import CliRunner
 
 from cprima_pdh import profiles
-from cprima_pdh.backends import kdbx, kdbx_format
+from cprima_pdh.backends import kdbx
+from cprima_pdh_kdbxkit import kdbx_format
 from cprima_pdh.cli import app
 from cprima_pdh.conform import conformance
 from cprima_pdh.schema import typing_of, validate

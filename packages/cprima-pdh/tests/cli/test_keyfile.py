@@ -11,7 +11,7 @@ from typer.testing import CliRunner
 from cprima_pdh import session
 from cprima_pdh.api import OpenError, open_vault
 from cprima_pdh.cli import app
-from cprima_pdh.source import pykeepass_open
+from cprima_pdh_kdbxkit.kdbx_vault import pykeepass_open
 
 KEY_BYTES = b"0123456789abcdef" * 4
 

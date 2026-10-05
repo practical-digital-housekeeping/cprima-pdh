@@ -13,7 +13,7 @@ from collections.abc import Iterable
 from datetime import datetime, timezone
 from dataclasses import replace
 
-from ..vault import STANDARD, EntryData, Field, GroupData, VaultBase, VaultInfo, resolve_entry
+from .vault import STANDARD, EntryData, Field, GroupData, VaultBase, VaultInfo, resolve_entry
 
 _BIN_NAME = "Recycle Bin"
 

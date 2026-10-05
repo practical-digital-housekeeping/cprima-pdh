@@ -9,8 +9,8 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
-from .transaction import Plan, guard  # noqa: F401  (re-exported: commands import them from here)
-from .transaction import execute
+from cprima_pdh_vault.transaction import Plan, guard  # noqa: F401  (re-exported: commands import them from here)
+from cprima_pdh_vault.transaction import execute
 
 
 def execute_vault(open_vault, db: Path, build, apply: bool) -> BaseModel:

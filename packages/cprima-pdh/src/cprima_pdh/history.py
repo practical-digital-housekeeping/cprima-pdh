@@ -10,7 +10,7 @@ from typing import Callable
 
 from .models import HistoryPrune, HistoryReport, HistorySnapshot, OrgChange
 from .txn import Plan, execute_vault
-from .vault import STANDARD, EntryData, Vault, as_vault, require
+from cprima_pdh_vault.vault import STANDARD, EntryData, Vault, as_vault, require
 from .write import WriteError, find_data
 
 

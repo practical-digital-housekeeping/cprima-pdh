@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Annotated, Optional
 
 import typer
+from cprima_pdh_kdbxkit.kdbx_vault import pykeepass_open
 
 from .. import export as export_mod
 from .. import source as source_mod
@@ -55,7 +56,7 @@ def _other(path: Path, keyfile: Optional[Path], fallback=None):
 
     def opener():
         try:
-            return source_mod.pykeepass_open(path, password, key)
+            return pykeepass_open(path, password, key)
         except Exception as exc:  # noqa: BLE001 - a wrong password or a damaged file: say so, never a traceback
             c.fail(f"write refused: cannot open {path.name}: {exc}")
 

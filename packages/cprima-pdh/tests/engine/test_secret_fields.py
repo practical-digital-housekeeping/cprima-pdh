@@ -4,8 +4,8 @@ import pytest
 from pdh_testkit import DEFAULT_PASSWORD, Entry, synthetic_vault
 
 from cprima_pdh import boundary, profiles, secret_fields
-from cprima_pdh.source import pykeepass_open
-from cprima_pdh.vault import EntryData, Field
+from cprima_pdh_kdbxkit.kdbx_vault import pykeepass_open
+from cprima_pdh_vault.vault import EntryData, Field
 from cprima_pdh.write import WriteError
 
 SSET = profiles.load(profiles.DEFAULT)

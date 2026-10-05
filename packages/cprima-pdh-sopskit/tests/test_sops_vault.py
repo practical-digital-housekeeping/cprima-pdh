@@ -13,12 +13,10 @@ from datetime import timezone
 import pytest
 from pdh_testkit.sopsfix import load_sops
 
-from cprima_pdh import profiles
-from cprima_pdh.backends import age
-from cprima_pdh.backends.sops import Backend, SopsVault, default_identities
-from cprima_pdh.backends.sops_format import SopsError, open_document
-from cprima_pdh.validation import validate_entries
-from cprima_pdh.vault import Field, Unsupported, require
+from cprima_pdh_sopskit import age
+from cprima_pdh_sopskit.sops_format import SopsError, open_document
+from cprima_pdh_sopskit.sops_vault import SopsVault, default_identities
+from cprima_pdh_vault.vault import Field, Unsupported, require
 
 FIX = load_sops("sops-json-basic")
 IDS = age.identities_from_text(FIX.identity_text)
@@ -92,12 +90,6 @@ def test_find_entry(vault):
         vault.find_entry("Other/nope")
 
 
-def test_the_engine_validates_a_sops_vault_like_any_other(vault):
-    report = validate_entries(vault.entries(), profiles.load("pdh-default"))
-    assert report.unclassified_entries == 5  # no entry names a record type
-    assert any(f.rule == "unknown-field" for f in report.findings)  # `customer_no` etc. are not all vocabulary terms
-
-
 # --- refusing what is not right ------------------------------------------------------------------------------------------
 
 def test_an_identity_that_is_not_a_recipient_is_refused():
@@ -162,10 +154,6 @@ def test_default_identities_come_from_the_environment(monkeypatch, tmp_path):
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
     with pytest.raises(SopsError, match="no age identity"):
         default_identities()
-
-
-def test_the_backend_reports_its_dependency():
-    assert Backend.name == "sops" and Backend.missing_dependencies() == []
 
 
 # --- age and bech32 --------------------------------------------------------------------------------------------------------

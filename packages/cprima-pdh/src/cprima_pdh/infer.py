@@ -5,7 +5,7 @@ from collections import Counter
 
 from .models import FieldUsage, GroupProfile, InferReport
 from .source import _totp_style_of
-from .vault import as_vault
+from cprima_pdh_vault.vault import as_vault
 
 
 def infer(source) -> InferReport:

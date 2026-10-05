@@ -14,7 +14,7 @@ from typing import Callable
 from .models import OrgChange
 from .organize import find_group
 from .txn import Plan, execute_vault
-from .vault import EntryData, Vault, require
+from cprima_pdh_vault.vault import EntryData, Vault, require
 from .write import WriteError, find_data
 
 BIN_NAME = "Recycle Bin"  # what a store names a recycle bin it has to create

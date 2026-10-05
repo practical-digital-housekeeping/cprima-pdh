@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Callable
 
 from .models import OrgChange
-from .vault import EntryData, Field, GroupData, Vault
+from cprima_pdh_vault.vault import EntryData, Field, GroupData, Vault
 from .write import WriteError, find_data
 
 
@@ -65,7 +65,7 @@ def new_entry(open_db: Callable[[], object], db: Path, group: str, title: str, u
     from datetime import date, datetime, timezone
 
     from . import boundary
-    from .backends.kdbx_format import OTP_PREFIXES, STANDARD_ATTR
+    from cprima_pdh_kdbxkit.kdbx_format import OTP_PREFIXES, STANDARD_ATTR
     from .txn import Plan, execute_vault
 
     fields, tags = dict(fields or {}), list(tags or [])

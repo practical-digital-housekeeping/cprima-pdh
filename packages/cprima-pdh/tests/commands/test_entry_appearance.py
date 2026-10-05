@@ -3,7 +3,7 @@ import pytest
 from pdh_testkit import DEFAULT_PASSWORD, Entry, synthetic_vault
 
 from cprima_pdh.entries import set_autotype, set_color, set_icon, set_override_url
-from cprima_pdh.source import pykeepass_open
+from cprima_pdh_kdbxkit.kdbx_vault import pykeepass_open
 from cprima_pdh.write import WriteError
 from pdh_testkit.cli import invoke
 

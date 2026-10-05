@@ -1,0 +1,17 @@
+[project]
+name = "cprima-pdh-vault"
+version = "0.0.0"
+description = "The vault interface of cprima-pdh: entries, groups, backends, and the one verified write path. No file format, no taxonomy."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [{ name = "Christian Prior-Mamulyan" }]
+dependencies = []
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/cprima_pdh_vault"]

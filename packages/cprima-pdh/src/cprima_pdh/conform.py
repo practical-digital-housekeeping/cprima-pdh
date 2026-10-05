@@ -9,7 +9,7 @@ from __future__ import annotations
 from .models import LEVEL_ORDER, ConformanceReport, EntryConformance, Issue, RuleFinding
 from .schema import VOCABULARY, SchemaSet
 from .validation import live, typing_of, validate_entries
-from .vault import as_vault
+from cprima_pdh_vault.vault import as_vault
 
 
 def _q(text: str) -> str:

@@ -1,0 +1,20 @@
+[project]
+name = "cprima-pdh-kdbxkit"
+version = "0.0.0"
+description = "KeePass (KDBX) vaults for cprima-pdh: a layer on pykeepass with verified writes. No taxonomy."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+authors = [{ name = "Christian Prior-Mamulyan" }]
+dependencies = ["cprima-pdh-vault", "pykeepass>=4.1", "lxml"]
+
+[tool.uv.sources]
+cprima-pdh-vault = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/cprima_pdh_kdbxkit"]

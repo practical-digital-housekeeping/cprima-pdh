@@ -9,7 +9,7 @@ from pdh_testkit.cli import invoke
 from pdh_testkit.xlsx import write_xlsx
 
 from cprima_pdh import profiles
-from cprima_pdh.source import pykeepass_open
+from cprima_pdh_kdbxkit.kdbx_vault import pykeepass_open
 
 pytestmark = pytest.mark.usefixtures("opens_with_the_test_password")
 

@@ -1,17 +1,12 @@
-"""The writable KdbxVault: every pykeepass workaround behaves through the Vault API, and `execute_vault` writes safely."""
+"""The writable KdbxVault: every pykeepass workaround behaves through the Vault API, and `execute` writes safely."""
 from datetime import datetime, timezone
 
 import pytest
-from pydantic import BaseModel
 from pdh_testkit import DEFAULT_PASSWORD, Entry, synthetic_vault
 
-from cprima_pdh.backends.kdbx_vault import KdbxVault
-from cprima_pdh.txn import Plan, execute_vault
-from cprima_pdh.write import WriteError
-
-
-class Change(BaseModel):
-    applied: bool = False
+from cprima_pdh_kdbxkit.kdbx_vault import KdbxVault
+from cprima_pdh_vault.transaction import Plan, execute
+from cprima_pdh_vault.vault import WriteError
 
 
 @pytest.fixture
@@ -112,7 +107,7 @@ def test_kdf_names_and_sets(db):
         v.set_kdf(info["iterations"], info["memory_kib"], info["parallelism"])
 
 
-def test_execute_vault_replaces_only_after_verifying(db):
+def test_execute_replaces_only_after_verifying(db):
     def build(vault):
         eid = by_title(vault, "a").id
 
@@ -120,12 +115,12 @@ def test_execute_vault_replaces_only_after_verifying(db):
             v.snapshot_history(eid)
             v.set_field(eid, "Notes", "changed")
 
-        return Plan(change=Change(), mutate=mutate, touched={eid})
+        return Plan(change="the report", mutate=mutate, touched={eid})
 
-    dry = execute_vault(lambda: opened(db), db, build, apply=False)
-    assert dry.applied is False and by_title(opened(db), "a").notes != "changed"
-    done = execute_vault(lambda: opened(db), db, build, apply=True)
-    assert done.applied and by_title(opened(db), "a").notes == "changed"
+    change, written = execute(lambda: opened(db), db, build, apply=False)
+    assert change == "the report" and written is False and by_title(opened(db), "a").notes != "changed"
+    change, written = execute(lambda: opened(db), db, build, apply=True)
+    assert change == "the report" and written is True and by_title(opened(db), "a").notes == "changed"
     assert not list(db.parent.glob("*.pdh-new*"))
 
 
@@ -135,8 +130,8 @@ def test_a_failed_verification_leaves_the_vault_alone(db):
     def build(vault):
         eid = by_title(vault, "a").id
         other = by_title(vault, "b").id
-        return Plan(change=Change(), mutate=lambda v: v.set_field(other, "Notes", "sneaky"), touched={eid})
+        return Plan(change="the report", mutate=lambda v: v.set_field(other, "Notes", "sneaky"), touched={eid})
 
     with pytest.raises(WriteError):
-        execute_vault(lambda: opened(db), db, build, apply=True)
+        execute(lambda: opened(db), db, build, apply=True)
     assert db.read_bytes() == before and not list(db.parent.glob("*.pdh-new*"))

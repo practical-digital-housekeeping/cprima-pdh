@@ -6,7 +6,7 @@ from typing import Callable
 
 from .models import AttachmentItem, AttachmentsReport, OrgChange
 from .txn import Plan, execute_vault
-from .vault import Vault, as_vault, require
+from cprima_pdh_vault.vault import Vault, as_vault, require
 from .write import WriteError, find_data
 
 

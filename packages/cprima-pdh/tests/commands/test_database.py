@@ -8,7 +8,7 @@ from pykeepass import PyKeePass
 from typer.testing import CliRunner
 
 from cprima_pdh.cli import _common, app
-from cprima_pdh.source import pykeepass_open
+from cprima_pdh_kdbxkit.kdbx_vault import pykeepass_open
 from pdh_testkit.cli import invoke
 
 pytestmark = pytest.mark.usefixtures("opens_with_the_test_password")
@@ -167,6 +167,6 @@ def test_kdf_names_the_derivation_of_a_real_clients_kdbx41_vault(tmp_path, monke
 
 
 def test_the_kdf_is_named_from_its_parameters_not_from_the_library(vault):
-    from cprima_pdh.backends.kdbx_format import kdf_name
+    from cprima_pdh_kdbxkit.kdbx_format import kdf_name
 
     assert kdf_name(pykeepass_open(vault, DEFAULT_PASSWORD, None)) == "argon2d"  # what pykeepass writes

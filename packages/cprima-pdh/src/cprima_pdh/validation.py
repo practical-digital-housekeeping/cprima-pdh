@@ -11,7 +11,7 @@ import re
 
 from collections import Counter
 
-from .backends.kdbx_format import OTP_PREFIXES, STANDARD_PROTECTED  # (the KeePass 2 OTP plugin's own fields are not user fields)
+from cprima_pdh_kdbxkit.kdbx_format import OTP_PREFIXES, STANDARD_PROTECTED  # (the KeePass 2 OTP plugin's own fields are not user fields)
 from .models import Link, LinksReport, ReadReport, RuleFinding, SchemaStats, TypedEntry, UnclassifiedReport, ValidationReport
 from .schema import (
     SCHEMA_PSEUDO,
@@ -33,7 +33,7 @@ from .schema import (
     vocabulary_index,
     Typing,
 )
-from .vault import STANDARD, EntryData
+from cprima_pdh_vault.vault import STANDARD, EntryData
 
 _XML_SPACE = " \t\r\n"  # what XPath's normalize-space() treats as white space
 _ASCII_LOWER = str.maketrans("ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz")

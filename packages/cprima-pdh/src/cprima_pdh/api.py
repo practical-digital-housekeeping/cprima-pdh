@@ -28,14 +28,14 @@ from pydantic import SecretStr
 
 from . import backends, boundary, profiles, secret_fields, spreadsheet, transfer
 from . import otp as otp_mod
-from .backends.kdbx_format import STANDARD_PROTECTED
-from .backends.kdbx_vault import KdbxVault
+from cprima_pdh_kdbxkit.kdbx_format import STANDARD_PROTECTED
+from cprima_pdh_kdbxkit.kdbx_vault import KdbxVault
 from .credentials import Credentials, from_environment
 from .credentials import secret as as_secret
 from .generate import PasswordSettings
 from .models import ImportReport, OtpCode
 from .schema import SchemaSet
-from .vault import EntryData
+from cprima_pdh_vault.vault import EntryData
 from .write import WriteError, find_data
 
 __all__ = ["Account", "FillResult", "NoSuchAccount", "OpenError", "ReadOnly", "SecretNotSet", "Vault", "VaultError", "open_vault"]

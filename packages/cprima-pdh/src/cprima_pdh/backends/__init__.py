@@ -18,7 +18,7 @@ class BackendInfo:
     available: bool  # its dependencies are installed
     detail: str
     detection: str = ""  # how a file of this kind is recognised
-    capabilities: tuple[str, ...] = ()  # what its vault can do (see `cprima_pdh.vault.CAPABILITIES`)
+    capabilities: tuple[str, ...] = ()  # what its vault can do (see `cprima_pdh_vault.vault.CAPABILITIES`)
 
 
 def _eps():
