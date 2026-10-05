@@ -6,7 +6,7 @@ import re
 from pathlib import Path
 
 SRC = Path(__file__).resolve().parents[2] / "src" / "cprima_pdh"
-BACKEND = {"kdbx.py", "kdbx_vault.py"}
+BACKEND = {"kdbx.py", "kdbx_format.py", "kdbx_vault.py"}
 # (pattern, what it would mean)
 FORBIDDEN = [
     (re.compile(r"^\s*(from|import)\s+pykeepass\b", re.M), "imports pykeepass"),

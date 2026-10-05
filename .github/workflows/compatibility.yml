@@ -11,10 +11,12 @@ on:
     paths:
       - "packages/cprima-pdh/src/cprima_pdh/backends/kdbx_vault.py"
       - "packages/cprima-pdh/src/cprima_pdh/backends/kdbx.py"
+      - "packages/cprima-pdh/src/cprima_pdh/backends/kdbx_format.py"
+      - "packages/cprima-pdh/src/cprima_pdh/transaction.py"
       - "packages/cprima-pdh/src/cprima_pdh/txn.py"
       - "packages/cprima-pdh/src/cprima_pdh/source.py"
       - "packages/cprima-pdh/src/cprima_pdh/database.py"
-      - "packages/cprima-pdh/src/cprima_pdh/sopsfmt.py"
+      - "packages/cprima-pdh/src/cprima_pdh/backends/sops_format.py"
       - "packages/pdh-testkit/vaults/**"
 
 jobs:

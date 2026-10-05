@@ -7,7 +7,7 @@ looks at a value.
 """
 from __future__ import annotations
 
-from .backends.kdbx import STANDARD_PROTECTED, is_secret_attribute
+from .backends.kdbx_format import STANDARD_PROTECTED, is_secret_attribute
 from .schema import SchemaSet, lookup_term, vocabulary_index
 
 

@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable
 
-from .backends.kdbx import OTP_STYLES, kdf_name
+from .backends.kdbx_format import OTP_STYLES, kdf_name
 from .backends.kdbx_vault import header_end, pykeepass_open, save_vault, stored_header_hash_ok  # (re-exported: the KDBX specifics live in the backend)  # noqa: F401
 from .models import (
     DbMeta,

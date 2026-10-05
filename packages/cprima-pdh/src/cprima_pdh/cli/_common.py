@@ -134,7 +134,7 @@ def open_vault(st: AppState, db: Path, key: Path | None):
         require_backend("sops")
         from ..backends import age
         from ..backends.sops import SopsVault, default_identities
-        from ..sopsfmt import SopsError
+        from ..backends.sops_format import SopsError
 
         try:
             return SopsVault.open(db, age.load_identities(key) if key else default_identities())

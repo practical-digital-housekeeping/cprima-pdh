@@ -11,7 +11,7 @@ from pykeepass import PyKeePass
 from typer.testing import CliRunner
 
 from cprima_pdh import profiles
-from cprima_pdh.backends import kdbx
+from cprima_pdh.backends import kdbx, kdbx_format
 from cprima_pdh.cli import app
 from cprima_pdh.conform import conformance
 from cprima_pdh.schema import typing_of, validate
@@ -49,7 +49,7 @@ def test_the_two_profiles_share_nothing_that_defines_a_type():
 def test_a_profile_only_uses_what_the_kdbx_backend_can_store():
     for sset in (DEFAULT, MINIMAL):
         assert set(sset.kinds) <= set(kdbx.KIND_STORAGE)
-        assert set(sset.standard) <= set(kdbx.STANDARD_ATTR)
+        assert set(sset.standard) <= set(kdbx_format.STANDARD_ATTR)
 
 
 def test_the_engine_checks_a_vault_against_the_minimal_profile(kp):

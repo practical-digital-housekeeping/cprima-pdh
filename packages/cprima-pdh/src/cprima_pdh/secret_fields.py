@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Callable
 
 from . import boundary
-from .backends.kdbx import STANDARD_PROTECTED
+from .backends.kdbx_format import STANDARD_PROTECTED
 from .generate import PasswordSettings, generate_password
 from .models import OrgChange
 from .schema import SchemaSet, _effective_protected, lookup_term, resolve, vocabulary_index

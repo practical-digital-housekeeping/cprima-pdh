@@ -65,7 +65,7 @@ def new_entry(open_db: Callable[[], object], db: Path, group: str, title: str, u
     from datetime import date, datetime, timezone
 
     from . import boundary
-    from .backends.kdbx import OTP_PREFIXES, STANDARD_ATTR
+    from .backends.kdbx_format import OTP_PREFIXES, STANDARD_ATTR
     from .txn import Plan, execute_vault
 
     fields, tags = dict(fields or {}), list(tags or [])

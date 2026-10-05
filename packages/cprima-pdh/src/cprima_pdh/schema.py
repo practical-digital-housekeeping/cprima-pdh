@@ -35,7 +35,7 @@ from .models import (
     ValidationReport,
     ValidationSummary,
 )
-from .backends.kdbx import OTP_PREFIXES, STANDARD_ATTR
+from .backends.kdbx_format import OTP_PREFIXES, STANDARD_ATTR
 
 DEFAULT_PROFILE = "pdh-default"  # the profile whose [level] and [standard] a taxonomy fragment inherits
 SCHEMA_PSEUDO = "schema-field"  # pseudo-schema name for findings about the binding field itself

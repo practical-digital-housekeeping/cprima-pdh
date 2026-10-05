@@ -28,7 +28,7 @@ from pydantic import SecretStr
 
 from . import backends, boundary, profiles, secret_fields, spreadsheet, transfer
 from . import otp as otp_mod
-from .backends.kdbx import STANDARD_PROTECTED
+from .backends.kdbx_format import STANDARD_PROTECTED
 from .backends.kdbx_vault import KdbxVault
 from .credentials import Credentials, from_environment
 from .credentials import secret as as_secret

@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Callable
 
 from . import __version__, backends, session
-from .backends.kdbx import OTP_PREFIXES
+from .backends.kdbx_format import OTP_PREFIXES
 from .models import DoctorCheck, DoctorReport
 from .write import _lock_files
 

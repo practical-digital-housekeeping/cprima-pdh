@@ -79,7 +79,7 @@ itself. Both markers are excluded from the default run.
 - **While working**: the tests of the module you change (`pytest packages/cprima-pdh/tests/test_x.py`, or `-k name`), then the default set.
 - **Before a commit**: the default set, green.
 - **After touching the KDBX backend, the save path, a file format or key derivation** (`backends/kdbx_vault.py`, `txn.py`,
-  `database.py`, `sopsfmt.py`): the default set, then compatibility and interoperability.
+  `database.py`, `backends/sops_format.py`): the default set, then compatibility and interoperability.
 - **Before a release**: all three sets. A release is a moment, not a kind of test; the tests that matter then are the two
   that check other environments and other implementations, which daily work does not need.
 - **Never**: serial runs piped through `tail`, which print nothing until the end. Run in parallel and stream to a file.

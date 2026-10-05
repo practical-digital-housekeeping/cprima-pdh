@@ -13,7 +13,7 @@ from pdh_testkit.paths import TAXONOMY
 from pdh_testkit.stubs import E, StubKP
 
 from cprima_pdh import profiles
-from cprima_pdh.backends import kdbx
+from cprima_pdh.backends import kdbx, kdbx_format
 from cprima_pdh.schema import SchemaError, parse_schemas, validate
 
 SSET = profiles.load(profiles.DEFAULT)
@@ -102,7 +102,7 @@ def test_a_standard_table_replaces_the_inherited_one():
 
 def test_the_backend_maps_every_standard_field_of_the_profile():
     """A profile cannot declare a standard field the kdbx backend does not know how to store."""
-    assert set(SSET.standard) == set(kdbx.STANDARD_ATTR)
+    assert set(SSET.standard) == set(kdbx_format.STANDARD_ATTR)
 
 
 def test_the_backend_stores_every_field_kind_of_the_profile():
@@ -301,19 +301,19 @@ def test_the_test_kit_keeps_no_area_table():
 
 def test_protected_standard_fields_are_those_whose_kind_is_a_secret():
     secret_kinds = {k for k, d in SSET.kinds.items() if d.default_protected}
-    assert set(kdbx.STANDARD_PROTECTED) == {n for n, s in SSET.standard.items() if s.kind in secret_kinds}
+    assert set(kdbx_format.STANDARD_PROTECTED) == {n for n, s in SSET.standard.items() if s.kind in secret_kinds}
 
 
 def test_the_otp_plugin_prefixes_and_their_styles():
-    assert kdbx.OTP_PREFIXES == ("TimeOtp-", "HmacOtp-")
-    assert kdbx.OTP_STYLES == {"TimeOtp-": "TimeOtp", "HmacOtp-": "HmacOtp"}
+    assert kdbx_format.OTP_PREFIXES == ("TimeOtp-", "HmacOtp-")
+    assert kdbx_format.OTP_STYLES == {"TimeOtp-": "TimeOtp", "HmacOtp-": "HmacOtp"}
 
 
 # --- nothing is defined twice ---------------------------------------------------------------------------
 
 def _sources():
     for p in sorted(SRC.rglob("*.py")):
-        if p.name != "kdbx.py":
+        if p.name not in ("kdbx.py", "kdbx_format.py"):  # the KDBX backend's own files
             yield p, p.read_text(encoding="utf-8")
 
 

@@ -13,7 +13,7 @@ import time
 from dataclasses import dataclass
 from urllib.parse import parse_qs, unquote, urlparse
 
-from .backends.kdbx import plugin_otp
+from .backends.kdbx_format import plugin_otp
 from .models import OtpCode
 
 _ALGORITHMS = {"SHA1": hashlib.sha1, "SHA256": hashlib.sha256, "SHA512": hashlib.sha512}

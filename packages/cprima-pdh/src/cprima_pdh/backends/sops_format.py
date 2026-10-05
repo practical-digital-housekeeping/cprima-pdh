@@ -14,7 +14,7 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
-from .backends import age
+from . import age
 
 # sops starts the MAC hash with these bytes (sha256 of b"sops") when `mac_only_encrypted` is set, so such a MAC always
 # differs from one made without the setting (sops.go: MACOnlyEncryptedInitialization).

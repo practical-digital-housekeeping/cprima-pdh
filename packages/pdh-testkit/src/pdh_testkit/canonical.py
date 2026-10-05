@@ -35,7 +35,7 @@ def link_targets(sset) -> set[str]:
 
 def entry_plan(names: list[str], sset) -> dict:
     """What one canonical entry holds: title, standard fields, custom fields with their protection, expiry."""
-    from cprima_pdh.backends.kdbx import STANDARD_ATTR  # the standard fields are the profile's; the backend maps them
+    from cprima_pdh.backends.kdbx_format import STANDARD_ATTR  # the standard fields are the profile's; the backend maps them
     from cprima_pdh.schema import _merge, resolve
 
     flat = None

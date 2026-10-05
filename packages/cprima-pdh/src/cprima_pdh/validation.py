@@ -11,7 +11,7 @@ import re
 
 from collections import Counter
 
-from .backends.kdbx import OTP_PREFIXES, STANDARD_PROTECTED  # (the KeePass 2 OTP plugin's own fields are not user fields; moves to the backend)
+from .backends.kdbx_format import OTP_PREFIXES, STANDARD_PROTECTED  # (the KeePass 2 OTP plugin's own fields are not user fields)
 from .models import Link, LinksReport, ReadReport, RuleFinding, SchemaStats, TypedEntry, UnclassifiedReport, ValidationReport
 from .schema import (
     SCHEMA_PSEUDO,

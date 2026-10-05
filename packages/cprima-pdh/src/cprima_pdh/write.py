@@ -4,7 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Callable
 
-from .backends.kdbx import STANDARD_ATTR, STANDARD_PROTECTED
+from .backends.kdbx_format import STANDARD_ATTR, STANDARD_PROTECTED
 from . import boundary
 from .models import Change
 from .schema import make_ref, uuid_key

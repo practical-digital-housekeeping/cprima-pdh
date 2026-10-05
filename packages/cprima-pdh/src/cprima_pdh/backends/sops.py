@@ -21,7 +21,7 @@ from typing import Any
 
 from ..vault import STANDARD, EntryData, Field, GroupData, VaultBase, VaultInfo, resolve_entry
 from . import age
-from ..sopsfmt import SopsDocument, SopsError, is_sops, open_document
+from .sops_format import SopsDocument, SopsError, is_sops, open_document
 
 _NAMESPACE = uuid.UUID("2f8a8a7e-5f4b-4f0e-9a39-7d1f6f2b6c11")  # ids are derived from paths: sops files have no UUIDs
 

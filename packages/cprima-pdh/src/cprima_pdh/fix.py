@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable
 
-from .backends.kdbx import OTP_PREFIXES, STANDARD_ATTR
+from .backends.kdbx_format import OTP_PREFIXES, STANDARD_ATTR
 from .models import FixAction, FixPlan
 from .schema import SchemaSet, lookup_term, vocabulary_index
 from .validation import live

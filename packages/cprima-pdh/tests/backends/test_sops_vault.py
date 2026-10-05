@@ -16,7 +16,7 @@ from pdh_testkit.sopsfix import load_sops
 from cprima_pdh import profiles
 from cprima_pdh.backends import age
 from cprima_pdh.backends.sops import Backend, SopsVault, default_identities
-from cprima_pdh.sopsfmt import SopsError, open_document
+from cprima_pdh.backends.sops_format import SopsError, open_document
 from cprima_pdh.validation import validate_entries
 from cprima_pdh.vault import Field, Unsupported, require
 

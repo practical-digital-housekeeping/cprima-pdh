@@ -23,7 +23,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from ..vault import STANDARD, EntryData, Field, GroupData, VaultBase, VaultInfo, register_adapter, resolve_entry
-from .kdbx import STANDARD_ATTR, kdf_name
+from .kdbx_format import STANDARD_ATTR, kdf_name
 
 # KDBX versions whose writing has been verified against genuine KeePassXC files (3.1, 4.0 and 4.1 templates); anything else
 # can be read but is not written.
